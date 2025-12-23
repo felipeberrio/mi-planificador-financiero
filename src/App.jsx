@@ -2,24 +2,31 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   PlusCircle, Trash2, Wallet, ArrowUpCircle, ArrowDownCircle, 
   Calendar, Settings, List, Search, Edit3, Copy, X, TrendingUp, 
-  CreditCard, RotateCcw, PiggyBank, Moon, Sun, ArrowRightCircle, Repeat, ArrowUp, ArrowDown, Target, Plus, AlertTriangle, Gift, Clock
+  CreditCard, RotateCcw, PiggyBank, Moon, Sun, ArrowRightCircle, Repeat, ArrowUp, ArrowDown, Target, Plus, AlertTriangle, Sparkles
 } from 'lucide-react';
 import { 
-  PieChart, Pie, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid
+  PieChart, Pie, Legend, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid
 } from 'recharts';
 
 const App = () => {
   // --- 1. ESTADOS ---
   const [incomes, setIncomes] = useState(() => JSON.parse(localStorage.getItem('fin_incomes')) || []);
   const [expenses, setExpenses] = useState(() => JSON.parse(localStorage.getItem('fin_expenses')) || []);
+  
+  // Categorías
   const [categories, setCategories] = useState(() => JSON.parse(localStorage.getItem('fin_categories')) || ["Vivienda", "Comida", "Transporte", "Salud", "Ocio", "Suscripciones", "Tecnología"]);
-  const incomeCategories = ["Salario", "Ingreso Extra", "Devolución", "Regalo", "Inversión", "Otro"];
+  const incomeCategories = ["Salario", "Ingreso Extra", "Devolución", "Regalo", "Inversión", "Otro"]; // RESTAURADO
 
   const [recurring, setRecurring] = useState(() => JSON.parse(localStorage.getItem('fin_recurring')) || []);
   const [goals, setGoals] = useState(() => JSON.parse(localStorage.getItem('fin_goals')) || []); 
   const [budgets, setBudgets] = useState(() => JSON.parse(localStorage.getItem('fin_budgets')) || []); 
   const [darkMode, setDarkMode] = useState(() => JSON.parse(localStorage.getItem('fin_dark')) || false);
   
+  // MAGIC INPUT STATE (RESTAURADO)
+  const [magicText, setMagicText] = useState("");
+  const [magicPreview, setMagicPreview] = useState(null);
+
+  // Inicialización de orden de bloques
   const [leftOrder, setLeftOrder] = useState(() => {
     const saved = JSON.parse(localStorage.getItem('fin_order'));
     const defaultOrder = ['form', 'goals', 'budgets', 'categories', 'recurring'];
@@ -39,13 +46,13 @@ const App = () => {
 
   const [themeColor, setThemeColor] = useState(localStorage.getItem('fin_theme') || '#3b82f6');
   const [walletFilter, setWalletFilter] = useState('all'); 
-  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all'); // FILTRO RESTAURADO
   const [dateFrom, setDateFrom] = useState(""); 
   const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
   const [activeTab, setActiveTab] = useState('expense'); 
   const [newCat, setNewCat] = useState("");
   const [editingCategory, setEditingCategory] = useState({ oldName: '', newName: '' });
-  const [sortBy, setSortBy] = useState('date-desc');
+  const [sortBy, setSortBy] = useState('date-desc'); // FILTRO RESTAURADO
   const [searchTerm, setSearchTerm] = useState("");
   const [editingId, setEditingId] = useState(null);
 
@@ -74,7 +81,46 @@ const App = () => {
     localStorage.setItem('fin_order', JSON.stringify(leftOrder));
   }, [incomes, expenses, categories, wallets, recurring, goals, budgets, themeColor, darkMode, leftOrder]);
 
-  // --- LÓGICA ---
+  // --- LÓGICA MAGIC INPUT (RESTAURADO) ---
+  useEffect(() => {
+    if (!magicText.trim()) { setMagicPreview(null); return; }
+    const lowerText = magicText.toLowerCase();
+    
+    // Detectar monto
+    const amountMatch = magicText.match(/[\$]?\d+([.,]\d{1,2})?/);
+    const amount = amountMatch ? amountMatch[0].replace('$','').replace(',','.') : null;
+
+    // Detectar Wallet
+    let detectedWallet = null;
+    wallets.forEach(w => { if (lowerText.includes(w.name.toLowerCase())) detectedWallet = w.id; });
+    
+    // Detectar Categoría
+    let detectedCategory = null;
+    categories.forEach(c => { if(lowerText.includes(c.toLowerCase())) detectedCategory = c; });
+    
+    if (amount || detectedWallet || detectedCategory) {
+      setMagicPreview({ amount, walletId: detectedWallet, category: detectedCategory });
+    } else {
+      setMagicPreview(null);
+    }
+  }, [magicText, wallets, categories]);
+
+  const applyMagic = () => {
+    if (!magicPreview) return;
+    setActiveTab('expense');
+    setExpenseForm({
+      ...expenseForm,
+      amount: magicPreview.amount || expenseForm.amount,
+      walletId: magicPreview.walletId || wallets[0].id,
+      category: magicPreview.category || categories[0],
+      name: magicText, // Usamos el texto completo como nombre
+      date: new Date().toISOString().split('T')[0]
+    });
+    setMagicText("");
+    setMagicPreview(null);
+  };
+
+  // --- LÓGICA ESTADÍSTICAS ---
   const walletStats = useMemo(() => {
     return wallets.map(w => {
       const wIncomes = incomes.filter(i => i.walletId === w.id).reduce((sum, curr) => sum + Number(curr.amount), 0);
@@ -90,9 +136,8 @@ const App = () => {
     const now = new Date();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
-    // Calcular días restantes del mes
     const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0);
-    const daysRemaining = Math.ceil((lastDayOfMonth - now) / (1000 * 60 * 60 * 24));
+    const daysRemaining = Math.ceil((lastDayOfMonth - now) / (1000 * 60 * 60 * 24)); // RESTAURADO: CUANTO FALTA
 
     return budgets.map(b => {
       const spent = expenses
@@ -121,10 +166,9 @@ const App = () => {
 
     let runningSum = 0;
     const data = [];
-    // Recorremos en orden inverso (del más antiguo al más nuevo) para el gráfico de línea
-    const sortedForGraph = [...all].sort((a, b) => new Date(a.date) - new Date(b.date));
-    
-    for (const t of sortedForGraph) {
+    // Orden cronológico para la gráfica
+    const chrono = [...all].sort((a, b) => new Date(a.date) - new Date(b.date));
+    for (const t of chrono) {
       runningSum += (t.type === 'income' ? Number(t.amount) : -Number(t.amount));
       data.push({ fecha: t.date, balance: runningSum });
     }
@@ -136,14 +180,15 @@ const App = () => {
     list = list.filter(t => {
       const isDate = (dateFrom ? t.date >= dateFrom : true) && (dateTo ? t.date <= dateTo : true);
       const isWallet = walletFilter === 'all' || t.walletId === walletFilter;
-      const isCat = categoryFilter === 'all' || t.category === categoryFilter; 
+      const isCat = categoryFilter === 'all' || (t.type === 'expense' && t.category === categoryFilter) || (t.type === 'income' && t.category === categoryFilter); // Filtro Categoría Restaurado
       const isSearch = searchTerm ? t.name.toLowerCase().includes(searchTerm.toLowerCase()) || (t.details && t.details.toLowerCase().includes(searchTerm.toLowerCase())) : true;
       return isDate && isWallet && isCat && isSearch;
     });
-    return list.sort((a, b) => sortBy === 'date-desc' ? new Date(b.date) - new Date(a.date) : Number(b.amount) - Number(a.amount));
+    // Filtro Recientes/Antiguos Restaurado
+    return list.sort((a, b) => sortBy === 'date-desc' ? new Date(b.date) - new Date(a.date) : sortBy === 'date-asc' ? new Date(a.date) - new Date(b.date) : Number(b.amount) - Number(a.amount));
   }, [incomes, expenses, sortBy, searchTerm, walletFilter, categoryFilter, dateFrom, dateTo]);
 
-  // --- ACCIONES ---
+  // --- HANDLERS ---
   const handleFastDate = (month, year) => {
     if (!month || !year) return;
     const from = `${year}-${month.padStart(2, '0')}-01`;
@@ -159,9 +204,7 @@ const App = () => {
   };
 
   const deleteWallet = (id) => {
-    if (window.confirm("¿Eliminar cuenta? Los movimientos quedarán huérfanos.")) {
-      setWallets(wallets.filter(w => w.id !== id));
-    }
+    if (window.confirm("¿Eliminar cuenta?")) setWallets(wallets.filter(w => w.id !== id)); // RESTAURADO BOTON BORRAR
   };
 
   const handleGoalSave = () => {
@@ -251,14 +294,12 @@ const App = () => {
     setLeftOrder(newOrder);
   };
 
+  // RESTAURADO: INTERACCIÓN GRÁFICO
   const onPieClick = (data) => {
-    if (categoryFilter === data.name) {
-      setCategoryFilter('all'); 
-    } else {
-      setCategoryFilter(data.name); 
-    }
+    setCategoryFilter(categoryFilter === data.name ? 'all' : data.name);
   };
 
+  // --- ESTILOS ---
   const cardClass = darkMode ? "bg-slate-900 border-slate-800 shadow-none" : "bg-white border-slate-100 shadow-sm";
   const textClass = darkMode ? "text-slate-100" : "text-slate-800";
   const mutedText = darkMode ? "text-slate-400" : "text-slate-500";
@@ -267,7 +308,7 @@ const App = () => {
   return (
     <div className={`min-h-screen pb-12 font-sans transition-colors duration-300 relative overflow-x-hidden ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
       
-      {/* BACKGROUND WATERMARK */}
+      {/* BACKGROUND WATERMARK (RESTAURADO) */}
       <div className={`fixed inset-0 pointer-events-none z-0 overflow-hidden flex items-center justify-center opacity-[0.03] ${darkMode ? 'text-white' : 'text-slate-900'}`} style={{ color: themeColor }}>
          <Wallet size={800} strokeWidth={0.5} />
       </div>
@@ -318,7 +359,7 @@ const App = () => {
 
       {/* HEADER */}
       <header className={`border-b px-6 py-4 mb-8 sticky top-0 z-40 backdrop-blur-md flex flex-col md:flex-row items-center justify-between gap-4 relative z-30 ${darkMode ? 'bg-slate-950/80 border-slate-800' : 'bg-white/80 border-slate-100'}`}>
-          <div className="flex items-center gap-2" style={{ color: themeColor }}><Wallet size={28} strokeWidth={2.5} /><h1 className="text-xl font-black uppercase">FinPlan Pro <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full ml-1">v2.0</span></h1></div>
+          <div className="flex items-center gap-2" style={{ color: themeColor }}><Wallet size={28} strokeWidth={2.5} /><h1 className="text-xl font-black uppercase">FinPlan Pro <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full ml-1">v42</span></h1></div>
           <div className="flex flex-wrap gap-3 items-center">
             <div className={`flex p-1.5 rounded-2xl border items-center gap-2 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-100'}`}>
               <select className={`rounded-xl px-2 py-1 text-[10px] font-black uppercase outline-none bg-transparent ${textClass}`} onChange={(e) => {
@@ -388,6 +429,13 @@ const App = () => {
             if(block === 'form') return (
               <section key="form" className={`p-5 rounded-[2.2rem] border relative ${cardClass} ${editingId ? 'ring-2 ring-amber-400' : ''}`}>
                 <div className="absolute right-4 top-4 flex gap-1 z-20">{upBtn}{downBtn}</div>
+                {/* MAGIC INPUT (RESTAURADO) */}
+                <div className={`flex items-center gap-2 p-3 rounded-2xl border-2 mb-4 transition-all ${darkMode ? 'bg-slate-950 border-indigo-900' : 'bg-white border-indigo-100'}`} style={{ borderColor: magicText ? themeColor : undefined }}>
+                  <Sparkles size={18} className={magicText ? "text-indigo-500 animate-pulse" : "text-slate-300"} />
+                  <input placeholder="✨ Magic: 'Cena $25 en Mcdonalds...'" className={`flex-1 bg-transparent outline-none text-sm font-bold ${textClass}`} value={magicText} onChange={e => setMagicText(e.target.value)} onKeyPress={e => e.key === 'Enter' && applyMagic()} />
+                  {magicPreview && <button onClick={applyMagic} className="bg-indigo-500 text-white p-1 rounded-lg"><ArrowRightCircle size={14}/></button>}
+                </div>
+
                 <div className={`flex p-1 rounded-2xl mb-4 ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
                   <button onClick={() => setActiveTab('expense')} className={`flex-1 py-2 rounded-xl font-bold text-xs ${activeTab === 'expense' ? (darkMode ? 'bg-slate-700 text-rose-400 shadow-lg' : 'bg-white text-rose-500 shadow-sm') : 'text-slate-500'}`}>Gasto</button>
                   <button onClick={() => setActiveTab('income')} className={`flex-1 py-2 rounded-xl font-bold text-xs ${activeTab === 'income' ? (darkMode ? 'bg-slate-700 text-emerald-400 shadow-lg' : 'bg-white text-emerald-500 shadow-sm') : 'text-slate-500'}`}>Ingreso</button>
@@ -469,7 +517,7 @@ const App = () => {
                       dataKey="value" 
                       cx="50%" 
                       cy="45%" 
-                      onClick={onPieClick} 
+                      onClick={onPieClick} // INTERACTIVO RESTAURADO
                       cursor="pointer"
                       label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
                     >
@@ -490,7 +538,7 @@ const App = () => {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "#334155" : "#f1f5f9"} />
                     <XAxis 
                       dataKey="fecha" 
-                      hide={false}
+                      hide={false} // EJE X RESTAURADO
                       axisLine={false}
                       tickLine={false}
                       tick={{fontSize: 10, fill: darkMode ? '#94a3b8' : '#64748b'}}
@@ -517,7 +565,8 @@ const App = () => {
               <div className="flex flex-wrap gap-2">
                 <select value={walletFilter} onChange={(e) => setWalletFilter(e.target.value)} className={`text-[10px] font-black uppercase px-3 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="all">🏦 Todas las Wallets</option>{wallets.map(w => <option key={w.id} value={w.id} className="text-slate-900">{w.name}</option>)}</select>
                 <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={`text-[10px] font-black uppercase px-3 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="all">🏷️ Todas Categorías</option>{categories.map(c => <option key={c} value={c} className="text-slate-900">{c}</option>)}</select>
-                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={`text-[10px] font-black uppercase px-4 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="date-desc">📅 Recientes</option><option value="amount-desc">💰 Monto Max</option></select>
+                {/* FILTRO ANTIGUOS/RECIENTES RESTAURADO */}
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={`text-[10px] font-black uppercase px-4 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="date-desc">📅 Recientes</option><option value="date-asc">📅 Antiguos</option><option value="amount-desc">💰 Monto Max</option></select>
               </div>
             </div>
             <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[600px] overflow-y-auto px-4 py-2">
