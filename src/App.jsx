@@ -1,0 +1,554 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  PlusCircle, Trash2, Wallet, ArrowUpCircle, ArrowDownCircle, 
+  Calendar, Settings, List, Search, Edit3, Copy, X, TrendingUp, 
+  CreditCard, RotateCcw, PiggyBank, Moon, Sun, ArrowRightCircle, Repeat, ArrowUp, ArrowDown, Target, Plus, AlertTriangle, Gift, Clock
+} from 'lucide-react';
+import { 
+  PieChart, Pie, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid
+} from 'recharts';
+
+const App = () => {
+  // --- 1. ESTADOS ---
+  const [incomes, setIncomes] = useState(() => JSON.parse(localStorage.getItem('fin_incomes')) || []);
+  const [expenses, setExpenses] = useState(() => JSON.parse(localStorage.getItem('fin_expenses')) || []);
+  const [categories, setCategories] = useState(() => JSON.parse(localStorage.getItem('fin_categories')) || ["Vivienda", "Comida", "Transporte", "Salud", "Ocio", "Suscripciones", "Tecnología"]);
+  const incomeCategories = ["Salario", "Ingreso Extra", "Devolución", "Regalo", "Inversión", "Otro"];
+
+  const [recurring, setRecurring] = useState(() => JSON.parse(localStorage.getItem('fin_recurring')) || []);
+  const [goals, setGoals] = useState(() => JSON.parse(localStorage.getItem('fin_goals')) || []); 
+  const [budgets, setBudgets] = useState(() => JSON.parse(localStorage.getItem('fin_budgets')) || []); 
+  const [darkMode, setDarkMode] = useState(() => JSON.parse(localStorage.getItem('fin_dark')) || false);
+  
+  const [leftOrder, setLeftOrder] = useState(() => {
+    const saved = JSON.parse(localStorage.getItem('fin_order'));
+    const defaultOrder = ['form', 'goals', 'budgets', 'categories', 'recurring'];
+    if (!saved) return defaultOrder;
+    const newOrder = [...saved];
+    if (!newOrder.includes('goals')) newOrder.splice(1, 0, 'goals');
+    if (!newOrder.includes('budgets')) newOrder.splice(2, 0, 'budgets');
+    return newOrder;
+  });
+  
+  const [wallets, setWallets] = useState(() => JSON.parse(localStorage.getItem('fin_wallets')) || [
+    { id: 'w1', name: 'Bolsita (Físico)', type: 'cash', limit: 0 },
+    { id: 'w2', name: 'Billetera', type: 'cash', limit: 0 },
+    { id: 'w3', name: 'Tarjeta Débito', type: 'bank', limit: 0 },
+    { id: 'w4', name: 'Tarjeta Crédito', type: 'credit', limit: 2000 }
+  ]);
+
+  const [themeColor, setThemeColor] = useState(localStorage.getItem('fin_theme') || '#3b82f6');
+  const [walletFilter, setWalletFilter] = useState('all'); 
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [dateFrom, setDateFrom] = useState(""); 
+  const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
+  const [activeTab, setActiveTab] = useState('expense'); 
+  const [newCat, setNewCat] = useState("");
+  const [editingCategory, setEditingCategory] = useState({ oldName: '', newName: '' });
+  const [sortBy, setSortBy] = useState('date-desc');
+  const [searchTerm, setSearchTerm] = useState("");
+  const [editingId, setEditingId] = useState(null);
+
+  // Modales
+  const [modalMode, setModalMode] = useState(null);
+  const [walletForm, setWalletForm] = useState({ id: '', name: '', type: 'cash', limit: 0 });
+  const [goalForm, setGoalForm] = useState({ id: '', name: '', target: '', saved: 0 });
+  const [budgetForm, setBudgetForm] = useState({ id: '', category: '', limit: '' });
+
+  // Formularios
+  const [incomeForm, setIncomeForm] = useState({ name: '', amount: '', date: new Date().toISOString().split('T')[0], walletId: 'w3', category: 'Salario', details: '' });
+  const [expenseForm, setExpenseForm] = useState({ name: '', amount: '', date: new Date().toISOString().split('T')[0], walletId: 'w3', category: 'Vivienda', details: '' });
+  const [recurringForm, setRecurringForm] = useState({ name: '', amount: '', category: 'Vivienda' });
+
+  // --- PERSISTENCIA ---
+  useEffect(() => {
+    localStorage.setItem('fin_incomes', JSON.stringify(incomes));
+    localStorage.setItem('fin_expenses', JSON.stringify(expenses));
+    localStorage.setItem('fin_categories', JSON.stringify(categories));
+    localStorage.setItem('fin_wallets', JSON.stringify(wallets));
+    localStorage.setItem('fin_recurring', JSON.stringify(recurring));
+    localStorage.setItem('fin_goals', JSON.stringify(goals));
+    localStorage.setItem('fin_budgets', JSON.stringify(budgets));
+    localStorage.setItem('fin_theme', themeColor);
+    localStorage.setItem('fin_dark', JSON.stringify(darkMode));
+    localStorage.setItem('fin_order', JSON.stringify(leftOrder));
+  }, [incomes, expenses, categories, wallets, recurring, goals, budgets, themeColor, darkMode, leftOrder]);
+
+  // --- LÓGICA ---
+  const walletStats = useMemo(() => {
+    return wallets.map(w => {
+      const wIncomes = incomes.filter(i => i.walletId === w.id).reduce((sum, curr) => sum + Number(curr.amount), 0);
+      const wExpenses = expenses.filter(e => e.walletId === w.id).reduce((sum, curr) => sum + Number(curr.amount), 0);
+      const balance = wIncomes - wExpenses;
+      const currentDebt = w.type === 'credit' && balance < 0 ? Math.abs(balance) : 0;
+      const available = w.type === 'credit' ? (w.limit - currentDebt) : 0;
+      return { ...w, balance, currentDebt, available };
+    });
+  }, [incomes, expenses, wallets]);
+
+  const budgetStats = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    // Calcular días restantes del mes
+    const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0);
+    const daysRemaining = Math.ceil((lastDayOfMonth - now) / (1000 * 60 * 60 * 24));
+
+    return budgets.map(b => {
+      const spent = expenses
+        .filter(e => e.category === b.category && new Date(e.date).getMonth() === currentMonth && new Date(e.date).getFullYear() === currentYear)
+        .reduce((sum, curr) => sum + Number(curr.amount), 0);
+      return { ...b, spent, percentage: (spent / b.limit) * 100, daysRemaining };
+    });
+  }, [budgets, expenses]);
+
+  const totalNetWorth = useMemo(() => walletStats.reduce((sum, curr) => sum + curr.balance, 0), [walletStats]);
+
+  const filteredData = useMemo(() => {
+    const applyDate = (item) => (dateFrom ? item.date >= dateFrom : true) && (dateTo ? item.date <= dateTo : true);
+    const fExpenses = expenses.filter(e => applyDate(e) && (walletFilter === 'all' || e.walletId === walletFilter));
+    const pie = categories.map(cat => {
+      const value = fExpenses.filter(e => e.category === cat).reduce((sum, curr) => sum + Number(curr.amount), 0);
+      return { name: cat, value };
+    }).filter(item => item.value > 0);
+    return { pieData: pie };
+  }, [expenses, categories, dateFrom, dateTo, walletFilter]);
+
+  const trendData = useMemo(() => {
+    const all = [...incomes.map(i => ({ ...i, type: 'income' })), ...expenses.map(e => ({ ...e, type: 'expense' }))]
+      .filter(t => (walletFilter === 'all' || t.walletId === walletFilter) && (dateFrom ? t.date >= dateFrom : true) && (dateTo ? t.date <= dateTo : true))
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    let runningSum = 0;
+    const data = [];
+    // Recorremos en orden inverso (del más antiguo al más nuevo) para el gráfico de línea
+    const sortedForGraph = [...all].sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    for (const t of sortedForGraph) {
+      runningSum += (t.type === 'income' ? Number(t.amount) : -Number(t.amount));
+      data.push({ fecha: t.date, balance: runningSum });
+    }
+    return data.length > 0 ? data : [{ fecha: '', balance: 0 }];
+  }, [incomes, expenses, walletFilter, dateFrom, dateTo]);
+
+  const allTransactions = useMemo(() => {
+    let list = [...incomes.map(i => ({ ...i, type: 'income' })), ...expenses.map(e => ({ ...e, type: 'expense' }))];
+    list = list.filter(t => {
+      const isDate = (dateFrom ? t.date >= dateFrom : true) && (dateTo ? t.date <= dateTo : true);
+      const isWallet = walletFilter === 'all' || t.walletId === walletFilter;
+      const isCat = categoryFilter === 'all' || t.category === categoryFilter; 
+      const isSearch = searchTerm ? t.name.toLowerCase().includes(searchTerm.toLowerCase()) || (t.details && t.details.toLowerCase().includes(searchTerm.toLowerCase())) : true;
+      return isDate && isWallet && isCat && isSearch;
+    });
+    return list.sort((a, b) => sortBy === 'date-desc' ? new Date(b.date) - new Date(a.date) : Number(b.amount) - Number(a.amount));
+  }, [incomes, expenses, sortBy, searchTerm, walletFilter, categoryFilter, dateFrom, dateTo]);
+
+  // --- ACCIONES ---
+  const handleFastDate = (month, year) => {
+    if (!month || !year) return;
+    const from = `${year}-${month.padStart(2, '0')}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    setDateFrom(from); setDateTo(`${year}-${month.padStart(2, '0')}-${lastDay}`);
+  };
+
+  const handleWalletSave = () => {
+    if (!walletForm.name) return;
+    if (walletForm.id) setWallets(wallets.map(w => w.id === walletForm.id ? walletForm : w));
+    else setWallets([...wallets, { ...walletForm, id: 'w' + Date.now() }]);
+    setModalMode(null); setWalletForm({ id: '', name: '', type: 'cash', limit: 0 });
+  };
+
+  const deleteWallet = (id) => {
+    if (window.confirm("¿Eliminar cuenta? Los movimientos quedarán huérfanos.")) {
+      setWallets(wallets.filter(w => w.id !== id));
+    }
+  };
+
+  const handleGoalSave = () => {
+    if (!goalForm.name || !goalForm.target) return;
+    if (goalForm.id) setGoals(goals.map(g => g.id === goalForm.id ? goalForm : g));
+    else setGoals([...goals, { ...goalForm, id: 'g' + Date.now() }]);
+    setModalMode(null); setGoalForm({ id: '', name: '', target: '', saved: 0 });
+  };
+
+  const handleBudgetSave = () => {
+    if (!budgetForm.category || !budgetForm.limit) return;
+    const exists = budgets.find(b => b.category === budgetForm.category && b.id !== budgetForm.id);
+    if(exists) { alert("Ya existe un presupuesto para esta categoría"); return; }
+    if (budgetForm.id) setBudgets(budgets.map(b => b.id === budgetForm.id ? budgetForm : b));
+    else setBudgets([...budgets, { ...budgetForm, id: 'b' + Date.now() }]);
+    setModalMode(null); setBudgetForm({ id: '', category: categories[0], limit: '' });
+  };
+
+  const addFundsToGoal = (goal) => {
+    const amount = prompt(`Monto a sumar a ${goal.name}:`);
+    if (amount && !isNaN(amount)) setGoals(goals.map(g => g.id === goal.id ? { ...g, saved: Number(g.saved) + Number(amount) } : g));
+  };
+
+  const deleteGoal = (id) => setGoals(goals.filter(g => g.id !== id));
+  const deleteBudget = (id) => setBudgets(budgets.filter(b => b.id !== id));
+
+  const handleSave = () => {
+    const isIncome = activeTab === 'income';
+    const form = isIncome ? incomeForm : expenseForm;
+    if (!form.name || !form.amount) return;
+    const newItem = { ...form, id: editingId || Date.now(), type: activeTab };
+    if (editingId) {
+      if (isIncome) setIncomes(prev => prev.map(i => i.id === editingId ? newItem : i));
+      else setExpenses(prev => prev.map(e => e.id === editingId ? newItem : e));
+    } else {
+      if (isIncome) setIncomes(prev => [...prev, newItem]);
+      else setExpenses(prev => [...prev, newItem]);
+    }
+    setEditingId(null);
+    setIncomeForm({ name: '', amount: '', date: new Date().toISOString().split('T')[0], walletId: 'w3', category: 'Salario', details: '' });
+    setExpenseForm({ name: '', amount: '', date: new Date().toISOString().split('T')[0], walletId: 'w3', category: 'Vivienda', details: '' });
+  };
+
+  const startEdit = (item) => {
+    setEditingId(item.id); setActiveTab(item.type);
+    if (item.type === 'income') setIncomeForm({ ...item });
+    else setExpenseForm({ ...item });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const deleteItem = (id, type) => {
+    if (type === 'income') setIncomes(prev => prev.filter(i => i.id !== id));
+    else setExpenses(prev => prev.filter(e => e.id !== id));
+  };
+
+  const duplicateTransaction = (item) => {
+    const newItem = { ...item, id: Date.now(), date: new Date().toISOString().split('T')[0] };
+    if (item.type === 'income') setIncomes(prev => [...prev, newItem]);
+    else setExpenses(prev => [...prev, newItem]);
+  };
+
+  const addCategory = () => {
+    if (newCat.trim() && !categories.includes(newCat.trim())) {
+      setCategories([...categories, newCat.trim()]);
+      setNewCat("");
+    }
+  };
+
+  const handleUpdateCategory = () => {
+    if (!editingCategory.newName.trim()) return setEditingCategory({oldName:'', newName:''});
+    setCategories(prev => prev.map(c => c === editingCategory.oldName ? editingCategory.newName : c));
+    setExpenses(prev => prev.map(e => e.category === editingCategory.oldName ? {...e, category: editingCategory.newName} : e));
+    setEditingCategory({ oldName: '', newName: '' });
+  };
+
+  const copyRecurring = (item) => {
+    setActiveTab('expense');
+    setExpenseForm({ ...expenseForm, name: item.name, amount: item.amount, category: item.category });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const moveBlock = (direction, index) => {
+    const newOrder = [...leftOrder];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= newOrder.length) return;
+    [newOrder[index], newOrder[targetIndex]] = [newOrder[targetIndex], newOrder[index]];
+    setLeftOrder(newOrder);
+  };
+
+  const onPieClick = (data) => {
+    if (categoryFilter === data.name) {
+      setCategoryFilter('all'); 
+    } else {
+      setCategoryFilter(data.name); 
+    }
+  };
+
+  const cardClass = darkMode ? "bg-slate-900 border-slate-800 shadow-none" : "bg-white border-slate-100 shadow-sm";
+  const textClass = darkMode ? "text-slate-100" : "text-slate-800";
+  const mutedText = darkMode ? "text-slate-400" : "text-slate-500";
+  const borderClass = darkMode ? "border-slate-700" : "border-slate-200";
+
+  return (
+    <div className={`min-h-screen pb-12 font-sans transition-colors duration-300 relative overflow-x-hidden ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
+      
+      {/* BACKGROUND WATERMARK */}
+      <div className={`fixed inset-0 pointer-events-none z-0 overflow-hidden flex items-center justify-center opacity-[0.03] ${darkMode ? 'text-white' : 'text-slate-900'}`} style={{ color: themeColor }}>
+         <Wallet size={800} strokeWidth={0.5} />
+      </div>
+
+      {/* MODAL SYSTEM */}
+      {modalMode && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className={`${darkMode ? 'bg-slate-900 border border-slate-700' : 'bg-white'} rounded-[2.5rem] p-8 w-full max-w-md shadow-2xl relative z-50`}>
+            {modalMode === 'wallet' && (
+              <>
+                <h3 className={`text-xl font-black mb-6 flex gap-2 ${textClass}`}><Settings/> {walletForm.id ? 'Editar Cuenta' : 'Nueva Cuenta'}</h3>
+                <div className="space-y-4">
+                  <input placeholder="Nombre..." className={`w-full p-4 rounded-2xl font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={walletForm.name} onChange={e => setWalletForm({...walletForm, name: e.target.value})} />
+                  <select className={`w-full p-4 rounded-2xl font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={walletForm.type} onChange={e => setWalletForm({...walletForm, type: e.target.value})}>
+                    <option value="cash">Efectivo / Bolsa</option><option value="bank">Débito / Banco</option><option value="credit">Crédito (Deuda)</option>
+                  </select>
+                  {walletForm.type === 'credit' && <input type="number" placeholder="Cupo Total" className="w-full p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl font-black text-rose-500 outline-none" value={walletForm.limit} onChange={e => setWalletForm({...walletForm, limit: Number(e.target.value)})} />}
+                  <div className="flex gap-2"><button onClick={() => setModalMode(null)} className="flex-1 py-4 font-bold text-slate-400">Cancelar</button><button onClick={handleWalletSave} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg">GUARDAR</button></div>
+                </div>
+              </>
+            )}
+            {modalMode === 'goal' && (
+              <>
+                <h3 className={`text-xl font-black mb-6 flex gap-2 ${textClass}`}><Target/> {goalForm.id ? 'Editar Meta' : 'Nueva Meta'}</h3>
+                <div className="space-y-4">
+                  <input placeholder="Nombre (Ej: Viaje)" className={`w-full p-4 rounded-2xl font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={goalForm.name} onChange={e => setGoalForm({...goalForm, name: e.target.value})} />
+                  <input type="number" placeholder="Meta Total $" className={`w-full p-4 rounded-2xl font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={goalForm.target} onChange={e => setGoalForm({...goalForm, target: e.target.value})} />
+                  <input type="number" placeholder="Ya ahorrado $" className={`w-full p-4 rounded-2xl font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={goalForm.saved} onChange={e => setGoalForm({...goalForm, saved: e.target.value})} />
+                  <div className="flex gap-2"><button onClick={() => setModalMode(null)} className="flex-1 py-4 font-bold text-slate-400">Cancelar</button><button onClick={handleGoalSave} className="flex-1 py-4 bg-emerald-500 text-white rounded-2xl font-black shadow-lg">GUARDAR</button></div>
+                </div>
+              </>
+            )}
+            {modalMode === 'budget' && (
+              <>
+                <h3 className={`text-xl font-black mb-6 flex gap-2 ${textClass}`}><AlertTriangle/> Presupuesto Mensual</h3>
+                <div className="space-y-4">
+                  <select className={`w-full p-4 rounded-2xl font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={budgetForm.category} onChange={e => setBudgetForm({...budgetForm, category: e.target.value})}>
+                    {categories.map(c => <option key={c} value={c} className="text-slate-900">{c}</option>)}
+                  </select>
+                  <input type="number" placeholder="Límite Mensual $" className={`w-full p-4 rounded-2xl font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={budgetForm.limit} onChange={e => setBudgetForm({...budgetForm, limit: e.target.value})} />
+                  <div className="flex gap-2"><button onClick={() => setModalMode(null)} className="flex-1 py-4 font-bold text-slate-400">Cancelar</button><button onClick={handleBudgetSave} className="flex-1 py-4 bg-violet-500 text-white rounded-2xl font-black shadow-lg">DEFINIR</button></div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* HEADER */}
+      <header className={`border-b px-6 py-4 mb-8 sticky top-0 z-40 backdrop-blur-md flex flex-col md:flex-row items-center justify-between gap-4 relative z-30 ${darkMode ? 'bg-slate-950/80 border-slate-800' : 'bg-white/80 border-slate-100'}`}>
+          <div className="flex items-center gap-2" style={{ color: themeColor }}><Wallet size={28} strokeWidth={2.5} /><h1 className="text-xl font-black uppercase">FinPlan Pro <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full ml-1">v2.0</span></h1></div>
+          <div className="flex flex-wrap gap-3 items-center">
+            <div className={`flex p-1.5 rounded-2xl border items-center gap-2 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-100'}`}>
+              <select className={`rounded-xl px-2 py-1 text-[10px] font-black uppercase outline-none bg-transparent ${textClass}`} onChange={(e) => {
+                const month = e.target.value; const year = dateTo.split('-')[0] || '2025';
+                if(month) { const lastDay = new Date(year, month, 0).getDate(); setDateFrom(`${year}-${month.padStart(2, '0')}-01`); setDateTo(`${year}-${month.padStart(2, '0')}-${lastDay}`); }
+              }}>
+                <option value="">MES</option>{["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"].map((m, i) => <option key={m} value={i+1} className="text-slate-900">{m}</option>)}
+              </select>
+              <select className={`rounded-xl px-2 py-1 text-[10px] font-black outline-none bg-transparent ${textClass}`} onChange={(e) => { const year = e.target.value; if(year) { setDateFrom(`${year}-01-01`); setDateTo(`${year}-12-31`); } }}>
+                <option value="">AÑO</option>{["2024","2025","2026"].map(y => <option key={y} value={y} className="text-slate-900">{y}</option>)}
+              </select>
+              <div className="h-4 w-[1px] bg-slate-400 mx-1"></div>
+              <input type="date" className={`bg-transparent border-none text-[10px] font-bold outline-none w-24 ${textClass}`} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+              <span className="text-slate-400">→</span>
+              <input type="date" className={`bg-transparent border-none text-[10px] font-bold outline-none w-24 ${textClass}`} value={dateTo} onChange={e => setDateTo(e.target.value)} />
+              <button onClick={() => {setDateFrom(""); setDateTo(new Date().toISOString().split('T')[0]);}} className="p-1 text-slate-400 hover:text-blue-500"><RotateCcw size={14}/></button>
+              <button onClick={() => setDarkMode(!darkMode)} className={`p-2 rounded-xl ml-2 ${darkMode ? 'bg-amber-500 text-slate-900' : 'bg-slate-900 text-white'}`}>{darkMode ? <Sun size={16}/> : <Moon size={16}/>}</button>
+            </div>
+            <div className="flex gap-1">{['#3b82f6', '#8b5cf6', '#10b981', '#f43f5e', '#ec4899'].map(c => <button key={c} onClick={() => setThemeColor(c)} className="w-5 h-5 rounded-full border-2 border-white shadow-sm" style={{ backgroundColor: c }} />)}</div>
+          </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 grid grid-cols-1 lg:grid-cols-12 gap-8 relative z-10">
+        <div className="lg:col-span-4 space-y-6">
+          {/* NET WORTH DINAMICO */}
+          <div className={`p-6 rounded-[2.5rem] shadow-xl text-white relative overflow-hidden group border ${darkMode ? 'bg-slate-900 border-white/5' : 'border-black/5 shadow-2xl'}`} style={{ backgroundColor: darkMode ? '#0f172a' : themeColor }}>
+            <p className="text-white/70 text-[10px] font-black uppercase tracking-widest mb-1 flex items-center gap-2"><PiggyBank size={12}/> Patrimonio Neto Real</p>
+            <h2 className={`text-4xl font-black tracking-tighter ${totalNetWorth < 0 ? 'text-rose-200' : 'text-white'}`}>${totalNetWorth.toLocaleString()}</h2>
+            <div className="absolute -right-4 -bottom-4 opacity-10 rotate-12 group-hover:scale-110 transition-transform"><Wallet size={120}/></div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex justify-between items-center px-4"><p className={`text-[10px] font-black uppercase tracking-widest ${mutedText}`}>Mis Cuentas</p><button onClick={() => { setWalletForm({id:'', name:'', type:'cash', limit:0}); setModalMode('wallet'); }} className="p-1 text-blue-500 hover:bg-blue-50 rounded-lg"><PlusCircle size={18}/></button></div>
+            {walletStats.map(w => (
+              <div key={w.id} onClick={() => setWalletFilter(w.id === walletFilter ? 'all' : w.id)} className={`p-4 rounded-3xl border transition-all cursor-pointer relative overflow-hidden ${cardClass} ${w.id === walletFilter ? 'ring-2' : ''}`} style={w.id === walletFilter ? { borderColor: themeColor } : {}}>
+                <div className="relative z-10 flex justify-between items-start mb-1">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl" style={{ backgroundColor: `${themeColor}20`, color: themeColor }}>{w.type === 'credit' ? <CreditCard size={18}/> : <Wallet size={18}/>}</div>
+                    <div><p className={`text-xs font-bold ${textClass}`}>{w.name}</p>{w.type === 'credit' && <p className="text-[8px] font-black text-rose-500 uppercase">Usado: ${w.currentDebt.toLocaleString()}</p>}</div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className={`font-black text-sm ${w.balance < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>${w.balance.toLocaleString()}</span>
+                    <div className="flex gap-1">
+                      <button onClick={(e) => { e.stopPropagation(); setWalletForm(w); setModalMode('wallet'); }} className={`p-1 hover:text-blue-500 transition-colors ${mutedText}`}><Settings size={14}/></button>
+                      <button onClick={(e) => { e.stopPropagation(); deleteWallet(w.id); }} className={`p-1 hover:text-rose-500 transition-colors ${mutedText}`}><Trash2 size={14}/></button>
+                    </div>
+                  </div>
+                </div>
+                {w.type === 'credit' && (
+                  <div className="relative z-10 mt-1">
+                    <div className="flex justify-between text-[7px] font-black uppercase mb-1"><span className="text-rose-400">Deuda</span><span className="text-emerald-500 font-bold">Libre: ${w.available.toLocaleString()}</span></div>
+                    <div className={`w-full h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                      <div className="w-full h-full bg-emerald-400 relative">
+                        <div className="h-full bg-rose-500 absolute top-0 left-0 transition-all duration-1000" style={{ width: `${Math.min(100, (w.currentDebt / w.limit) * 100)}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {leftOrder.map((block, index) => {
+            const upBtn = <button onClick={() => moveBlock('up', index)} className={`p-1 hover:text-blue-500 ${mutedText}`}><ArrowUp size={12}/></button>;
+            const downBtn = <button onClick={() => moveBlock('down', index)} className={`p-1 hover:text-blue-500 ${mutedText}`}><ArrowDown size={12}/></button>;
+
+            if(block === 'form') return (
+              <section key="form" className={`p-5 rounded-[2.2rem] border relative ${cardClass} ${editingId ? 'ring-2 ring-amber-400' : ''}`}>
+                <div className="absolute right-4 top-4 flex gap-1 z-20">{upBtn}{downBtn}</div>
+                <div className={`flex p-1 rounded-2xl mb-4 ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                  <button onClick={() => setActiveTab('expense')} className={`flex-1 py-2 rounded-xl font-bold text-xs ${activeTab === 'expense' ? (darkMode ? 'bg-slate-700 text-rose-400 shadow-lg' : 'bg-white text-rose-500 shadow-sm') : 'text-slate-500'}`}>Gasto</button>
+                  <button onClick={() => setActiveTab('income')} className={`flex-1 py-2 rounded-xl font-bold text-xs ${activeTab === 'income' ? (darkMode ? 'bg-slate-700 text-emerald-400 shadow-lg' : 'bg-white text-emerald-500 shadow-sm') : 'text-slate-500'}`}>Ingreso</button>
+                </div>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" className={`p-3 rounded-xl text-xs font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={activeTab === 'expense' ? expenseForm.date : incomeForm.date} onChange={e => activeTab === 'expense' ? setExpenseForm({...expenseForm, date: e.target.value}) : setIncomeForm({...incomeForm, date: e.target.value})} />
+                    <select className={`p-3 rounded-xl text-xs font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={activeTab === 'expense' ? expenseForm.walletId : incomeForm.walletId} onChange={e => activeTab === 'expense' ? setExpenseForm({...expenseForm, walletId: e.target.value}) : setIncomeForm({...incomeForm, walletId: e.target.value})}>{wallets.map(w => <option key={w.id} value={w.id} className="text-slate-900">{w.name}</option>)}</select>
+                  </div>
+                  
+                  {activeTab === 'expense' ? (
+                    <select className={`w-full p-3 rounded-xl text-xs font-bold uppercase outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={expenseForm.category} onChange={e => setExpenseForm({...expenseForm, category: e.target.value})}>
+                      {categories.map(c => <option key={c} value={c} className="text-slate-900">{c}</option>)}
+                    </select>
+                  ) : (
+                    <select className={`w-full p-3 rounded-xl text-xs font-bold uppercase outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={incomeForm.category} onChange={e => setIncomeForm({...incomeForm, category: e.target.value})}>
+                      {incomeCategories.map(c => <option key={c} value={c} className="text-slate-900">{c}</option>)}
+                    </select>
+                  )}
+
+                  <input placeholder="Concepto..." className={`w-full p-3 rounded-xl text-sm outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={activeTab === 'expense' ? expenseForm.name : incomeForm.name} onChange={e => activeTab === 'expense' ? setExpenseForm({...expenseForm, name: e.target.value}) : setIncomeForm({...incomeForm, name: e.target.value})} />
+                  <input type="number" placeholder="Monto" className={`w-full p-3 rounded-xl font-black text-xl outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={activeTab === 'expense' ? expenseForm.amount : incomeForm.amount} onChange={e => activeTab === 'expense' ? setExpenseForm({...expenseForm, amount: e.target.value}) : setIncomeForm({...incomeForm, amount: e.target.value})} />
+                  <textarea placeholder="Notas opcionales..." className={`w-full p-3 rounded-xl text-xs outline-none border resize-none ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} rows="2" value={activeTab === 'expense' ? expenseForm.details : incomeForm.details} onChange={e => activeTab === 'expense' ? setExpenseForm({...expenseForm, details: e.target.value}) : setIncomeForm({...incomeForm, details: e.target.value})} />
+                  <button onClick={handleSave} className="w-full py-4 rounded-2xl font-black text-white shadow-lg active:scale-95 transition-all" style={{ backgroundColor: themeColor }}>{editingId ? 'ACTUALIZAR' : 'REGISTRAR'}</button>
+                </div>
+              </section>
+            );
+
+            if(block === 'goals') return (
+              <section key="goals" className={`p-6 rounded-[2.5rem] border relative ${cardClass}`}>
+                <div className="absolute right-4 top-4 flex gap-1">{upBtn}{downBtn}</div>
+                <div className="flex justify-between items-center mb-4 pr-16"><h3 className={`text-[10px] font-black uppercase flex items-center gap-2 ${mutedText}`}><Target size={14}/> Metas de Ahorro</h3><button onClick={()=>{setGoalForm({id:'', name:'', target:'', saved:0}); setModalMode('goal');}} className="p-1 text-emerald-500 bg-emerald-500/10 rounded-lg hover:bg-emerald-500/20"><Plus size={16}/></button></div>
+                <div className="space-y-3">{goals.map(g => (<div key={g.id} className={`p-3 rounded-xl border ${borderClass} ${darkMode ? 'bg-slate-800/50' : 'bg-slate-50'}`}><div className="flex justify-between mb-1"><span className={`text-xs font-bold ${textClass}`}>{g.name}</span><span className="text-[10px] font-bold text-emerald-500">${Number(g.saved).toLocaleString()} / ${Number(g.target).toLocaleString()}</span></div><div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden mb-2"><div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, (g.saved / g.target) * 100)}%` }}/></div><div className="flex justify-end gap-2"><button onClick={() => deleteGoal(g.id)} className="p-1.5 text-rose-400 bg-rose-400/10 rounded-lg"><Trash2 size={12}/></button><button onClick={() => { setGoalForm(g); setModalMode('goal'); }} className="p-1.5 text-blue-400 bg-blue-400/10 rounded-lg"><Edit3 size={12}/></button><button onClick={() => addFundsToGoal(g)} className="px-2 py-1 text-[9px] font-bold text-white bg-emerald-500 rounded-lg">+ Fondos</button></div></div>))}</div>
+              </section>
+            );
+
+            if(block === 'budgets') return (
+              <section key="budgets" className={`p-6 rounded-[2.5rem] border relative ${cardClass}`}>
+                <div className="absolute right-4 top-4 flex gap-1">{upBtn}{downBtn}</div>
+                <div className="flex justify-between items-center mb-4 pr-16"><h3 className={`text-[10px] font-black uppercase flex items-center gap-2 ${mutedText}`}><AlertTriangle size={14}/> Presupuestos (Fase 2)</h3><button onClick={()=>{setBudgetForm({id:'', category:categories[0], limit:''}); setModalMode('budget');}} className="p-1 text-violet-500 bg-violet-500/10 rounded-lg"><Plus size={16}/></button></div>
+                <div className="space-y-3">{budgetStats.map(b => (<div key={b.id} className={`p-3 rounded-xl border ${borderClass} ${darkMode?'bg-slate-800/50':'bg-slate-50'}`}><div className="flex justify-between mb-1"><div className="flex flex-col"><span className={`text-xs font-bold ${textClass}`}>{b.category}</span><span className={`text-[8px] font-bold ${mutedText}`}>Reinicia en {b.daysRemaining} días</span></div><span className={`text-[10px] font-black ${b.percentage>100?'text-rose-500':'text-violet-500'}`}>${b.spent.toLocaleString()} / ${Number(b.limit).toLocaleString()}</span></div><div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden mb-1"><div className={`h-full ${b.percentage>100?'bg-rose-500':'bg-violet-500'}`} style={{ width: `${Math.min(100, b.percentage)}%` }}/></div><div className="flex justify-end"><button onClick={() => deleteBudget(b.id)} className="text-[9px] text-rose-400">Eliminar</button></div></div>))}</div>
+              </section>
+            );
+
+            if(block === 'categories') return (
+              <section key="categories" className={`p-6 rounded-[2.5rem] border relative ${cardClass}`}>
+                <div className="absolute right-4 top-4 flex gap-1">{upBtn}{downBtn}</div>
+                <h3 className={`font-bold text-[10px] uppercase mb-4 flex items-center gap-2 ${mutedText}`}><Settings size={14}/> Categorías</h3>
+                <div className="flex gap-2 mb-4"><input placeholder="Nueva..." className={`flex-1 p-2.5 text-sm rounded-xl outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={newCat} onChange={e => setNewCat(e.target.value)} onKeyPress={(e) => {if(e.key==='Enter'&&newCat) addCategory();}} /><button onClick={addCategory} className="bg-slate-900 text-white p-2.5 rounded-xl"><PlusCircle size={20}/></button></div>
+                <div className="flex flex-wrap gap-2">{categories.map(c => (<div key={c} className="group relative">{editingCategory.oldName===c ? <div className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-lg p-1"><input autoFocus className="text-[10px] bg-white px-2 py-1 rounded w-20 font-bold outline-none text-slate-800" value={editingCategory.newName} onChange={e => setEditingCategory({...editingCategory, newName: e.target.value})} onBlur={handleUpdateCategory} onKeyPress={e => e.key === 'Enter' && handleUpdateCategory()} /></div> : <span className={`text-[10px] px-3 py-1.5 rounded-lg font-bold border flex items-center gap-2 transition-all ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'}`}>{c}<button onClick={() => setEditingCategory({ oldName: c, newName: c })} className="text-slate-400 hover:text-blue-500"><Edit3 size={12}/></button><button onClick={() => setCategories(categories.filter(cat => cat !== c))} className="text-rose-400 font-bold">×</button></span>}</div>))}</div>
+              </section>
+            );
+
+            if(block === 'recurring') return (
+              <section key="recurring" className={`p-6 rounded-[2.5rem] border relative ${cardClass}`}>
+                <div className="absolute right-4 top-4 flex gap-1">{upBtn}{downBtn}</div>
+                <h3 className={`text-[10px] font-black uppercase mb-4 flex items-center gap-2 ${mutedText}`}><Repeat size={14} style={{ color: themeColor }}/> Programados</h3>
+                <div className="flex gap-2 mb-4"><input placeholder="Fijo..." className={`flex-1 p-2.5 text-xs rounded-xl outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={recurringForm.name} onChange={e => setRecurringForm({...recurringForm, name: e.target.value})} /><input type="number" placeholder="$" className={`w-20 p-2.5 text-xs rounded-xl outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={recurringForm.amount} onChange={e => setRecurringForm({...recurringForm, amount: e.target.value})} /><button onClick={()=>{if(recurringForm.name)setRecurring([...recurring,{...recurringForm,id:Date.now()}]);setRecurringForm({name:'',amount:'',category:'Vivienda'});}} className="bg-slate-900 text-white p-2.5 rounded-xl"><PlusCircle size={18}/></button></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-48 overflow-y-auto">{recurring.map(item => (<div key={item.id} className={`flex items-center justify-between p-3 rounded-xl border ${borderClass} ${darkMode?'bg-slate-800/50':'bg-slate-50'}`}><div className="truncate"><p className={`text-[10px] font-black uppercase truncate ${textClass}`}>{item.name}</p><p className="text-[10px] font-bold text-slate-400">${Number(item.amount).toLocaleString()}</p></div><div className="flex gap-1"><button onClick={() => copyRecurring(item)} className="p-1.5 bg-blue-500/10 text-blue-500 rounded-lg"><ArrowRightCircle size={14}/></button><button onClick={() => setRecurring(recurring.filter(r=>r.id!==item.id))} className="p-1.5 bg-rose-500/10 text-rose-500 rounded-lg"><Trash2 size={14}/></button></div></div>))}</div>
+              </section>
+            );
+            return null;
+          })}
+        </div>
+
+        <div className="lg:col-span-8 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* PIE CHART */}
+            <div className={`p-6 rounded-[2.5rem] border min-h-[460px] flex flex-col ${cardClass}`}>
+              <h3 className={`font-bold text-[10px] uppercase mb-4 tracking-widest ${mutedText}`}>Distribución</h3>
+              <div className="flex-1 w-full h-full relative">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie 
+                      data={filteredData.pieData} 
+                      innerRadius="55%" 
+                      outerRadius="75%" 
+                      paddingAngle={6} 
+                      dataKey="value" 
+                      cx="50%" 
+                      cy="45%" 
+                      onClick={onPieClick} 
+                      cursor="pointer"
+                      label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                    >
+                      {filteredData.pieData.map((_, i) => <Cell key={i} fill={['#3B82F6', '#8B5CF6', '#10B981', '#f43f5e', '#F59E0B', '#EC4899'][i % 6]} stroke="none" />)}
+                    </Pie>
+                    <Tooltip contentStyle={{borderRadius: '16px', border:'none', backgroundColor: darkMode ? '#1e293b' : '#fff', color: darkMode ? '#fff' : '#334155'}} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            {/* AREA CHART */}
+            <div className={`p-6 rounded-[2.5rem] border min-h-[460px] flex flex-col ${cardClass}`}>
+              <h3 className={`font-bold text-[10px] uppercase mb-4 tracking-widest text-emerald-500`}>Línea de Tiempo</h3>
+              <div className="flex-1 w-full h-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={trendData} margin={{ top: 20, right: 15, left: -10, bottom: 20 }}>
+                    <defs><linearGradient id="themeGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={themeColor} stopOpacity={0.3}/><stop offset="95%" stopColor={themeColor} stopOpacity={0}/></linearGradient></defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "#334155" : "#f1f5f9"} />
+                    <XAxis 
+                      dataKey="fecha" 
+                      hide={false}
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{fontSize: 10, fill: darkMode ? '#94a3b8' : '#64748b'}}
+                      tickFormatter={(value) => {
+                        if (!value) return '';
+                        const [year, month, day] = value.split('-');
+                        return `${day} ${['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(month)-1]}`;
+                      }}
+                      interval="preserveStartEnd"
+                      minTickGap={30}
+                    />
+                    <YAxis tick={{fontSize: 10, fontWeight: 'bold', fill: '#64748b'}} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{borderRadius: '16px', border: 'none', backgroundColor: darkMode ? '#1e293b' : '#fff', color: darkMode ? '#fff' : '#334155'}} />
+                    <Area type="monotone" dataKey="balance" stroke={themeColor} fill="url(#themeGrad)" strokeWidth={3} animationDuration={1200} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          <div className={`rounded-[2.5rem] border overflow-hidden ${cardClass}`}>
+            <div className={`p-6 md:p-8 border-b flex flex-col gap-4 ${darkMode ? 'bg-slate-900/50' : 'bg-slate-50/50'}`}>
+              <div className="flex justify-between items-center w-full"><h3 className={`font-black text-lg flex items-center gap-2 ${textClass}`}><List size={18} style={{ color: themeColor }}/> Historial General</h3><div className="relative md:w-64"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14}/><input placeholder="Buscar..." className={`pl-9 pr-4 py-2 border rounded-xl text-xs w-full font-bold outline-none ${borderClass} ${darkMode ? 'bg-slate-800' : 'bg-white'} ${textClass}`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div></div>
+              <div className="flex flex-wrap gap-2">
+                <select value={walletFilter} onChange={(e) => setWalletFilter(e.target.value)} className={`text-[10px] font-black uppercase px-3 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="all">🏦 Todas las Wallets</option>{wallets.map(w => <option key={w.id} value={w.id} className="text-slate-900">{w.name}</option>)}</select>
+                <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={`text-[10px] font-black uppercase px-3 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="all">🏷️ Todas Categorías</option>{categories.map(c => <option key={c} value={c} className="text-slate-900">{c}</option>)}</select>
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={`text-[10px] font-black uppercase px-4 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="date-desc">📅 Recientes</option><option value="amount-desc">💰 Monto Max</option></select>
+              </div>
+            </div>
+            <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[600px] overflow-y-auto px-4 py-2">
+              {allTransactions.map(item => {
+                const wallet = wallets.find(w => w.id === item.walletId);
+                return (
+                  <div key={item.id} className={`p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 group rounded-2xl my-1 flex items-center justify-between text-left ${item.id === editingId ? 'ring-2 ring-amber-400' : ''}`}>
+                    <div className="flex gap-4 items-center flex-1 min-w-0">
+                      <div className={`p-3 rounded-2xl ${item.type === 'income' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>{item.type === 'income' ? <ArrowUpCircle size={22}/> : <ArrowDownCircle size={22}/>}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap truncate">
+                          <h4 className={`font-bold text-sm ${textClass}`}>{item.name}</h4>
+                          <span className={`text-[8px] px-2 py-0.5 rounded font-black uppercase ${darkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500'}`} style={{color: !darkMode ? themeColor : undefined}}>{item.type === 'expense' ? item.category : 'Ingreso'}</span>
+                          <span className={`text-[8px] font-black px-2 py-0.5 rounded border uppercase ${borderClass}`} style={{ color: themeColor }}>{wallet?.name || 'Borrada'}</span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 shrink-0 min-w-0"><p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{item.date}</p>{item.details && <p className="text-[10px] text-slate-500 italic truncate max-w-[200px]">"{item.details}"</p>}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className={`font-black text-xl tracking-tighter mr-3 ${item.type === 'income' ? 'text-emerald-500' : 'text-rose-500'}`}>${Number(item.amount).toLocaleString()}</span>
+                      <div className="flex opacity-0 group-hover:opacity-100 transition-all gap-1"><button onClick={() => startEdit(item)} className={`p-2 hover:text-blue-500 ${mutedText}`}><Edit3 size={16}/></button><button onClick={() => duplicateTransaction(item)} className={`p-2 hover:text-emerald-500 ${mutedText}`}><Copy size={16}/></button><button onClick={() => deleteItem(item.id, item.type)} className={`p-2 hover:text-rose-500 ${mutedText}`}><Trash2 size={16}/></button></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default App;
