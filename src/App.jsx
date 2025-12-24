@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   PlusCircle, Trash2, Wallet, ArrowUpCircle, ArrowDownCircle, 
-  Calendar, Settings, List, Search, Edit3, Copy, X, TrendingUp, 
+  Settings, List, Search, Edit3, Copy, X, TrendingUp, 
   CreditCard, RotateCcw, PiggyBank, Moon, Sun, ArrowRightCircle, 
   Repeat, ArrowUp, ArrowDown, Target, Plus, AlertTriangle, Sparkles, 
-  Clock, AlertCircle, ChevronDown, ChevronUp
+  Clock, AlertCircle, ChevronDown, ChevronUp, Eye, EyeOff, 
+  CreditCard as CardIcon, Maximize2
 } from 'lucide-react';
 import { 
   PieChart, Pie, Legend, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -16,7 +17,7 @@ const App = () => {
   const [expenses, setExpenses] = useState(() => JSON.parse(localStorage.getItem('fin_expenses')) || []);
   
   // Categorías
-  const [categories, setCategories] = useState(() => JSON.parse(localStorage.getItem('fin_categories')) || ["Vivienda", "Comida", "Transporte", "Salud", "Ocio", "Suscripciones", "Tecnología"]);
+  const [categories, setCategories] = useState(() => JSON.parse(localStorage.getItem('fin_categories')) || ["🏠 Vivienda", "🍔 Comida", "🚌 Transporte", "💊 Salud", "🎉 Ocio", "📺 Suscripciones", "📱 Tecnología"]);
   const incomeCategories = ["Salario", "Ingreso Extra", "Devolución", "Regalo", "Inversión", "Otro"]; 
 
   const [recurring, setRecurring] = useState(() => JSON.parse(localStorage.getItem('fin_recurring')) || []);
@@ -24,13 +25,19 @@ const App = () => {
   const [budgets, setBudgets] = useState(() => JSON.parse(localStorage.getItem('fin_budgets')) || []); 
   const [darkMode, setDarkMode] = useState(() => JSON.parse(localStorage.getItem('fin_dark')) || false);
   
-  // --- ESTADO DE VISIBILIDAD DE SECCIONES (NUEVO) ---
+  // --- MODO PRIVACIDAD ---
+  const [privacyMode, setPrivacyMode] = useState(() => JSON.parse(localStorage.getItem('fin_privacy')) || false);
+
+  // --- ESTADO DE VISIBILIDAD DE SECCIONES ---
   const [sectionState, setSectionState] = useState(() => JSON.parse(localStorage.getItem('fin_sections_view')) || {
-    form: true, goals: true, budgets: true, categories: true, recurring: true
+    form: true, goals: true, budgets: true, categories: true, recurring: true, wallets: true
   });
 
   const [lastActivity, setLastActivity] = useState(() => localStorage.getItem('fin_last_activity') || "Sin actividad");
   const [isLate, setIsLate] = useState(false); 
+
+  // --- ESTADO PARA GRÁFICA EXPANDIDA ---
+  const [expandedChart, setExpandedChart] = useState(null);
 
   // MAGIC INPUT STATE
   const [magicText, setMagicText] = useState("");
@@ -65,6 +72,8 @@ const App = () => {
   const [sortBy, setSortBy] = useState('date-desc'); 
   const [searchTerm, setSearchTerm] = useState("");
   const [editingId, setEditingId] = useState(null);
+  
+  const historyRef = useRef(null);
 
   // Modales
   const [modalMode, setModalMode] = useState(null);
@@ -89,8 +98,9 @@ const App = () => {
     localStorage.setItem('fin_theme', themeColor);
     localStorage.setItem('fin_dark', JSON.stringify(darkMode));
     localStorage.setItem('fin_order', JSON.stringify(leftOrder));
-    localStorage.setItem('fin_sections_view', JSON.stringify(sectionState)); // Guardar estado colapsado
-  }, [incomes, expenses, categories, wallets, recurring, goals, budgets, themeColor, darkMode, leftOrder, sectionState]);
+    localStorage.setItem('fin_sections_view', JSON.stringify(sectionState));
+    localStorage.setItem('fin_privacy', JSON.stringify(privacyMode)); 
+  }, [incomes, expenses, categories, wallets, recurring, goals, budgets, themeColor, darkMode, leftOrder, sectionState, privacyMode]);
 
   // CALCULAR SI ESTAMOS "LATE"
   useEffect(() => {
@@ -109,7 +119,21 @@ const App = () => {
     return () => window.removeEventListener('focus', checkLateness);
   }, [lastActivity]);
 
-  // --- TOUCH ACTIVITY ---
+  const getThemePalette = (theme) => {
+    switch(theme) {
+        case '#3b82f6': return ['#3b82f6', '#60a5fa', '#93c5fd', '#2563eb', '#1d4ed8', '#1e40af']; 
+        case '#8b5cf6': return ['#8b5cf6', '#a78bfa', '#c4b5fd', '#7c3aed', '#6d28d9', '#5b21b6']; 
+        case '#10b981': return ['#10b981', '#34d399', '#6ee7b7', '#059669', '#047857', '#065f46']; 
+        case '#f43f5e': return ['#f43f5e', '#fb7185', '#fda4af', '#e11d48', '#be123c', '#9f1239']; 
+        case '#ec4899': return ['#ec4899', '#f472b6', '#fbcfe8', '#db2777', '#be185d', '#9d174d']; 
+        default: return ['#3B82F6', '#8B5CF6', '#10B981', '#f43f5e', '#F59E0B', '#EC4899'];
+    }
+  };
+  
+  const currentPalette = useMemo(() => getThemePalette(themeColor), [themeColor]);
+
+  const getCategoryIcon = (name) => Array.from(name)[0];
+
   const touchActivity = () => {
     const now = new Date();
     localStorage.setItem('fin_last_activity_ts', now.toISOString());
@@ -120,16 +144,28 @@ const App = () => {
     setIsLate(false); 
   };
 
-  // --- TOGGLE SECTION ---
   const toggleSection = (section) => {
     setSectionState(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
-  // --- MAGIC INPUT ---
+  const handleBudgetClick = (category) => {
+    setCategoryFilter(category);
+    setWalletFilter('all');
+    if (historyRef.current) {
+        historyRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+    setExpandedChart(null);
+  };
+
+  // --- MAGIC INPUT (CORREGIDO) ---
   useEffect(() => {
-    if (!magicText.trim()) { setMagicPreview(null); return; }
+    if (!magicText.trim()) { 
+        if(magicPreview) setMagicPreview(null); // Verificación para evitar re-render innecesario
+        return; 
+    }
     const lowerText = magicText.toLowerCase();
-    const amountMatch = magicText.match(/[\$]?\d+([.,]\d{1,2})?/);
+    // Regex corregido (quitado el escape innecesario)
+    const amountMatch = magicText.match(/[$]?\d+([.,]\d{1,2})?/);
     const amount = amountMatch ? amountMatch[0].replace('$','').replace(',','.') : null;
     let detectedWallet = null;
     wallets.forEach(w => { if (lowerText.includes(w.name.toLowerCase())) detectedWallet = w.id; });
@@ -140,7 +176,7 @@ const App = () => {
     } else {
       setMagicPreview(null);
     }
-  }, [magicText, wallets, categories]);
+  }, [magicText, wallets, categories, magicPreview]);
 
   const applyMagic = () => {
     if (!magicPreview) return;
@@ -186,6 +222,11 @@ const App = () => {
 
   const totalNetWorth = useMemo(() => walletStats.reduce((sum, curr) => sum + curr.balance, 0), [walletStats]);
 
+  const activeWallet = useMemo(() => {
+    if (walletFilter === 'all') return null;
+    return walletStats.find(w => w.id === walletFilter);
+  }, [walletFilter, walletStats]);
+
   const filteredData = useMemo(() => {
     const applyDate = (item) => (dateFrom ? item.date >= dateFrom : true) && (dateTo ? item.date <= dateTo : true);
     const fExpenses = expenses.filter(e => applyDate(e) && (walletFilter === 'all' || e.walletId === walletFilter));
@@ -222,8 +263,7 @@ const App = () => {
     return list.sort((a, b) => sortBy === 'date-desc' ? new Date(b.date) - new Date(a.date) : sortBy === 'date-asc' ? new Date(a.date) - new Date(b.date) : Number(b.amount) - Number(a.amount));
   }, [incomes, expenses, sortBy, searchTerm, walletFilter, categoryFilter, dateFrom, dateTo]);
 
-  // --- HANDLERS (SAVE/DELETE/EDIT) ---
-  const handleFastDate = (month, year) => { if (!month || !year) return; const from = `${year}-${month.padStart(2, '0')}-01`; const lastDay = new Date(year, month, 0).getDate(); setDateFrom(from); setDateTo(`${year}-${month.padStart(2, '0')}-${lastDay}`); };
+  // --- HANDLERS ---
   const handleWalletSave = () => { if (!walletForm.name) return; if (walletForm.id) setWallets(wallets.map(w => w.id === walletForm.id ? walletForm : w)); else setWallets([...wallets, { ...walletForm, id: 'w' + Date.now() }]); setModalMode(null); setWalletForm({ id: '', name: '', type: 'cash', limit: 0 }); touchActivity(); };
   const deleteWallet = (id) => { if (window.confirm("¿Eliminar cuenta?")) { setWallets(wallets.filter(w => w.id !== id)); touchActivity(); } };
   const handleGoalSave = () => { if (!goalForm.name || !goalForm.target) return; if (goalForm.id) setGoals(goals.map(g => g.id === goalForm.id ? goalForm : g)); else setGoals([...goals, { ...goalForm, id: 'g' + Date.now() }]); setModalMode(null); setGoalForm({ id: '', name: '', target: '', saved: 0 }); touchActivity(); };
@@ -254,6 +294,59 @@ const App = () => {
       <div className={`fixed inset-0 pointer-events-none z-0 overflow-hidden flex items-center justify-center opacity-[0.03] ${darkMode ? 'text-white' : 'text-slate-900'}`} style={{ color: themeColor }}>
          <Wallet size={800} strokeWidth={0.5} />
       </div>
+
+      {/* --- MODAL DE GRÁFICA EXPANDIDA --- */}
+      {expandedChart && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <div className={`w-full max-w-4xl h-[80vh] rounded-[3rem] p-6 relative flex flex-col ${darkMode ? 'bg-slate-900 border border-slate-700' : 'bg-white'}`}>
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className={`text-2xl font-black uppercase flex items-center gap-3 ${textClass}`}>
+                        {expandedChart === 'pie' ? <><List/> Detalle de Distribución</> : <><TrendingUp/> Evolución Temporal</>}
+                    </h2>
+                    <button onClick={() => setExpandedChart(null)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full hover:scale-110 transition-transform">
+                        <X size={24} className={textClass}/>
+                    </button>
+                </div>
+                <div className="flex-1 w-full min-h-0">
+                    {expandedChart === 'pie' && (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie 
+                                    data={filteredData.pieData} 
+                                    innerRadius="50%" 
+                                    outerRadius="80%" 
+                                    paddingAngle={4} 
+                                    dataKey="value" 
+                                    label={({ name, percent }) => {
+                                        const value = (percent * 100).toFixed(0);
+                                        // MEJORA: Solo muestra el icono si es >= 20%
+                                        if (percent >= 0.2) return `${getCategoryIcon(name)} ${value}%`;
+                                        return `${value}%`;
+                                    }}
+                                >
+                                    {filteredData.pieData.map((_, i) => <Cell key={i} fill={currentPalette[i % currentPalette.length]} stroke="none" />)}
+                                </Pie>
+                                <Tooltip contentStyle={{borderRadius: '16px', border:'none', backgroundColor: darkMode ? '#1e293b' : '#fff', color: darkMode ? '#fff' : '#334155'}} />
+                                <Legend layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{color: darkMode ? '#fff' : '#334155', fontWeight: 'bold'}}/>
+                            </PieChart>
+                        </ResponsiveContainer>
+                    )}
+                    {expandedChart === 'trend' && (
+                         <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={trendData} margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
+                                <defs><linearGradient id="themeGradBig" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={themeColor} stopOpacity={0.5}/><stop offset="95%" stopColor={themeColor} stopOpacity={0}/></linearGradient></defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "#334155" : "#e2e8f0"} />
+                                <XAxis dataKey="fecha" tick={{fill: darkMode ? '#94a3b8' : '#64748b', fontSize: 12}} />
+                                <YAxis tick={{fill: darkMode ? '#94a3b8' : '#64748b', fontSize: 12}} />
+                                <Tooltip contentStyle={{borderRadius: '16px', border: 'none', backgroundColor: darkMode ? '#1e293b' : '#fff', color: darkMode ? '#fff' : '#334155'}} />
+                                <Area type="monotone" dataKey="balance" stroke={themeColor} fill="url(#themeGradBig)" strokeWidth={4} />
+                            </AreaChart>
+                         </ResponsiveContainer>
+                    )}
+                </div>
+            </div>
+        </div>
+      )}
 
       {/* MODAL SYSTEM */}
       {modalMode && (
@@ -304,7 +397,7 @@ const App = () => {
           <div className="flex flex-col md:flex-row items-center gap-4">
             <div className="flex items-center gap-2" style={{ color: themeColor }}>
                 <Wallet size={28} strokeWidth={2.5} />
-                <h1 className="text-xl font-black uppercase">FinPlan Pro <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full ml-1">v45</span></h1>
+                <h1 className="text-xl font-black uppercase">FinPlan Pro <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full ml-1">v50</span></h1>
             </div>
             
             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-[10px] font-bold uppercase tracking-wide transition-all duration-500 
@@ -342,42 +435,98 @@ const App = () => {
 
       <main className="max-w-7xl mx-auto px-4 grid grid-cols-1 lg:grid-cols-12 gap-8 relative z-10">
         <div className="lg:col-span-4 space-y-6">
-          {/* NET WORTH DINAMICO */}
-          <div className={`p-6 rounded-[2.5rem] shadow-xl text-white relative overflow-hidden group border ${darkMode ? 'bg-slate-900 border-white/5' : 'border-black/5 shadow-2xl'}`} style={{ backgroundColor: darkMode ? '#0f172a' : themeColor }}>
-            <p className="text-white/70 text-[10px] font-black uppercase tracking-widest mb-1 flex items-center gap-2"><PiggyBank size={12}/> Patrimonio Neto Real</p>
-            <h2 className={`text-4xl font-black tracking-tighter ${totalNetWorth < 0 ? 'text-rose-200' : 'text-white'}`}>${totalNetWorth.toLocaleString()}</h2>
-            <div className="absolute -right-4 -bottom-4 opacity-10 rotate-12 group-hover:scale-110 transition-transform"><Wallet size={120}/></div>
+          {/* --- TARJETA HERO DINAMICA --- */}
+          <div className={`p-6 rounded-[2.5rem] shadow-xl text-white relative overflow-hidden group border transition-all duration-300 ${darkMode ? 'bg-slate-900 border-white/5' : 'border-black/5 shadow-2xl'}`} style={{ backgroundColor: darkMode ? '#0f172a' : themeColor }}>
+            <div className="relative z-10">
+                <p className="text-white/70 text-[10px] font-black uppercase tracking-widest mb-1 flex items-center gap-2">
+                    {activeWallet ? (
+                        <>
+                            {activeWallet.type === 'credit' ? <CardIcon size={12}/> : <Wallet size={12}/>}
+                            {activeWallet.name}
+                        </>
+                    ) : (
+                        <><PiggyBank size={12}/> Patrimonio Neto Real</>
+                    )}
+                </p>
+                
+                {activeWallet && activeWallet.type === 'credit' ? (
+                    <div className="mt-2">
+                        <div className="flex items-end gap-2 mb-3">
+                           <h2 className={`text-4xl font-black tracking-tighter ${privacyMode ? 'blur-md select-none opacity-50' : ''}`}>${activeWallet.currentDebt.toLocaleString()}</h2>
+                           <span className="text-xs font-bold text-white/60 mb-1">Deuda Actual</span>
+                        </div>
+                        <div className="bg-black/20 rounded-2xl p-3 backdrop-blur-sm border border-white/10">
+                            <div className="flex justify-between text-[9px] font-black uppercase mb-1.5 text-white/80">
+                                <span>Uso del Cupo</span>
+                                <span className={privacyMode ? 'blur-[3px]' : ''}>Disponible: ${activeWallet.available.toLocaleString()}</span>
+                            </div>
+                            <div className="w-full h-3 bg-black/30 rounded-full overflow-hidden mb-1 border border-white/5">
+                                <div className="h-full bg-white relative">
+                                    <div className="h-full bg-rose-500 absolute top-0 left-0 transition-all duration-1000 shadow-[0_0_10px_rgba(244,63,94,0.6)]" style={{ width: `${Math.min(100, (activeWallet.currentDebt / activeWallet.limit) * 100)}%` }} />
+                                </div>
+                            </div>
+                            <div className="text-right text-[8px] font-bold text-white/50">Cupo Total: ${activeWallet.limit.toLocaleString()}</div>
+                        </div>
+                    </div>
+                ) : (
+                    <h2 className={`text-4xl font-black tracking-tighter transition-all duration-300 ${(!activeWallet && totalNetWorth < 0) || (activeWallet && activeWallet.balance < 0) ? 'text-rose-200' : 'text-white'} ${privacyMode ? 'blur-md select-none opacity-50' : ''}`}>
+                        ${activeWallet ? activeWallet.balance.toLocaleString() : totalNetWorth.toLocaleString()}
+                    </h2>
+                )}
+            </div>
+            
+            <div className="absolute -right-4 -bottom-4 opacity-10 rotate-12 group-hover:scale-110 transition-transform">
+                {activeWallet && activeWallet.type === 'credit' ? <CreditCard size={140}/> : <Wallet size={120}/>}
+            </div>
           </div>
 
           <div className="space-y-3">
-            <div className="flex justify-between items-center px-4"><p className={`text-[10px] font-black uppercase tracking-widest ${mutedText}`}>Mis Cuentas</p><button onClick={() => { setWalletForm({id:'', name:'', type:'cash', limit:0}); setModalMode('wallet'); }} className="p-1 text-blue-500 hover:bg-blue-50 rounded-lg"><PlusCircle size={18}/></button></div>
-            {walletStats.map(w => (
-              <div key={w.id} onClick={() => setWalletFilter(w.id === walletFilter ? 'all' : w.id)} className={`p-4 rounded-3xl border transition-all cursor-pointer relative overflow-hidden ${cardClass} ${w.id === walletFilter ? 'ring-2' : ''}`} style={w.id === walletFilter ? { borderColor: themeColor } : {}}>
-                <div className="relative z-10 flex justify-between items-start mb-1">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl" style={{ backgroundColor: `${themeColor}20`, color: themeColor }}>{w.type === 'credit' ? <CreditCard size={18}/> : <Wallet size={18}/>}</div>
-                    <div><p className={`text-xs font-bold ${textClass}`}>{w.name}</p>{w.type === 'credit' && <p className="text-[8px] font-black text-rose-500 uppercase">Usado: ${w.currentDebt.toLocaleString()}</p>}</div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <span className={`font-black text-sm ${w.balance < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>${w.balance.toLocaleString()}</span>
-                    <div className="flex gap-1">
-                      <button onClick={(e) => { e.stopPropagation(); setWalletForm(w); setModalMode('wallet'); }} className={`p-1 hover:text-blue-500 transition-colors ${mutedText}`}><Settings size={14}/></button>
-                      <button onClick={(e) => { e.stopPropagation(); deleteWallet(w.id); }} className={`p-1 hover:text-rose-500 transition-colors ${mutedText}`}><Trash2 size={14}/></button>
-                    </div>
-                  </div>
+            <div className="flex justify-between items-center px-4">
+                <p className={`text-[10px] font-black uppercase tracking-widest ${mutedText}`}>Mis Cuentas</p>
+                <div className="flex items-center gap-1">
+                    <button onClick={() => setPrivacyMode(!privacyMode)} className={`p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors ${mutedText}`} title="Ocultar saldos">
+                        {privacyMode ? <EyeOff size={16}/> : <Eye size={16}/>}
+                    </button>
+                    <button onClick={() => toggleSection('wallets')} className={`p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors ${mutedText}`} title="Minimizar">
+                        {sectionState.wallets ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+                    </button>
+                    <button onClick={() => { setWalletForm({id:'', name:'', type:'cash', limit:0}); setModalMode('wallet'); }} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg">
+                        <PlusCircle size={18}/>
+                    </button>
                 </div>
-                {w.type === 'credit' && (
-                  <div className="relative z-10 mt-1">
-                    <div className="flex justify-between text-[7px] font-black uppercase mb-1"><span className="text-rose-400">Deuda</span><span className="text-emerald-500 font-bold">Libre: ${w.available.toLocaleString()}</span></div>
-                    <div className={`w-full h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
-                      <div className="w-full h-full bg-emerald-400 relative">
-                        <div className="h-full bg-rose-500 absolute top-0 left-0 transition-all duration-1000" style={{ width: `${Math.min(100, (w.currentDebt / w.limit) * 100)}%` }} />
-                      </div>
+            </div>
+            
+            {sectionState.wallets && (
+                <div className="animate-in fade-in slide-in-from-top-2 duration-300 space-y-3">
+                    {walletStats.map(w => (
+                    <div key={w.id} onClick={() => setWalletFilter(w.id === walletFilter ? 'all' : w.id)} className={`p-4 rounded-3xl border transition-all cursor-pointer relative overflow-hidden ${cardClass} ${w.id === walletFilter ? 'ring-2' : ''}`} style={w.id === walletFilter ? { borderColor: themeColor } : {}}>
+                        <div className="relative z-10 flex justify-between items-start mb-1">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-xl" style={{ backgroundColor: `${themeColor}20`, color: themeColor }}>{w.type === 'credit' ? <CreditCard size={18}/> : <Wallet size={18}/>}</div>
+                            <div><p className={`text-xs font-bold ${textClass}`}>{w.name}</p>{w.type === 'credit' && <p className={`text-[8px] font-black text-rose-500 uppercase transition-all duration-300 ${privacyMode ? 'blur-[3px]' : ''}`}>Usado: ${w.currentDebt.toLocaleString()}</p>}</div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                            <span className={`font-black text-sm transition-all duration-300 ${w.balance < 0 ? 'text-rose-500' : 'text-emerald-500'} ${privacyMode ? 'blur-[6px] select-none bg-slate-200/50 dark:bg-slate-800/50 rounded text-transparent' : ''}`}>${w.balance.toLocaleString()}</span>
+                            <div className="flex gap-1">
+                            <button onClick={(e) => { e.stopPropagation(); setWalletForm(w); setModalMode('wallet'); }} className={`p-1 hover:text-blue-500 transition-colors ${mutedText}`}><Settings size={14}/></button>
+                            <button onClick={(e) => { e.stopPropagation(); deleteWallet(w.id); }} className={`p-1 hover:text-rose-500 transition-colors ${mutedText}`}><Trash2 size={14}/></button>
+                            </div>
+                        </div>
+                        </div>
+                        {w.type === 'credit' && (
+                        <div className="relative z-10 mt-1">
+                            <div className="flex justify-between text-[7px] font-black uppercase mb-1"><span className="text-rose-400">Deuda</span><span className={`text-emerald-500 font-bold transition-all duration-300 ${privacyMode ? 'blur-[3px]' : ''}`}>Libre: ${w.available.toLocaleString()}</span></div>
+                            <div className={`w-full h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                            <div className="w-full h-full bg-emerald-400 relative">
+                                <div className="h-full bg-rose-500 absolute top-0 left-0 transition-all duration-1000" style={{ width: `${Math.min(100, (w.currentDebt / w.limit) * 100)}%` }} />
+                            </div>
+                            </div>
+                        </div>
+                        )}
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                    ))}
+                </div>
+            )}
           </div>
 
           {leftOrder.map((block, index) => {
@@ -386,7 +535,6 @@ const App = () => {
             const isVisible = sectionState[block];
             const toggleBtn = <button onClick={() => toggleSection(block)} className={`p-1 hover:text-blue-500 ${mutedText}`}>{isVisible ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}</button>;
             
-            // Wrapper de botones
             const ctrls = <div className="absolute right-4 top-4 flex gap-1 z-20">{toggleBtn}<div className="w-[1px] h-3 bg-slate-300 mx-1 self-center"></div>{upBtn}{downBtn}</div>;
 
             if(block === 'form') return (
@@ -396,7 +544,6 @@ const App = () => {
                 
                 {isVisible && (
                   <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-                    {/* MAGIC INPUT */}
                     <div className={`flex items-center gap-2 p-3 rounded-2xl border-2 mb-4 transition-all ${darkMode ? 'bg-slate-950 border-indigo-900' : 'bg-white border-indigo-100'}`} style={{ borderColor: magicText ? themeColor : undefined }}>
                       <Sparkles size={18} className={magicText ? "text-indigo-500 animate-pulse" : "text-slate-300"} />
                       <input placeholder="✨ Magic: 'Cena $25 en Mcdonalds...'" className={`flex-1 bg-transparent outline-none text-sm font-bold ${textClass}`} value={magicText} onChange={e => setMagicText(e.target.value)} onKeyPress={e => e.key === 'Enter' && applyMagic()} />
@@ -445,7 +592,31 @@ const App = () => {
               <section key="budgets" className={`p-6 rounded-[2.5rem] border relative transition-all ${cardClass}`}>
                 {ctrls}
                 <div className={`flex justify-between items-center ${isVisible ? 'mb-4 pr-16' : ''}`}><h3 className={`text-[10px] font-black uppercase flex items-center gap-2 ${mutedText}`}><AlertTriangle size={14}/> Presupuestos</h3>{isVisible && <button onClick={()=>{setBudgetForm({id:'', category:categories[0], limit:''}); setModalMode('budget');}} className="p-1 text-violet-500 bg-violet-500/10 rounded-lg"><Plus size={16}/></button>}</div>
-                {isVisible && <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">{budgetStats.map(b => (<div key={b.id} className={`p-3 rounded-xl border ${borderClass} ${darkMode?'bg-slate-800/50':'bg-slate-50'}`}><div className="flex justify-between mb-1"><div className="flex flex-col"><span className={`text-xs font-bold ${textClass}`}>{b.category}</span><span className={`text-[8px] font-bold ${mutedText}`}>Reinicia en {b.daysRemaining} días</span></div><span className={`text-[10px] font-black ${b.percentage>100?'text-rose-500':'text-violet-500'}`}>${b.spent.toLocaleString()} / ${Number(b.limit).toLocaleString()}</span></div><div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden mb-1"><div className={`h-full ${b.percentage>100?'bg-rose-500':'bg-violet-500'}`} style={{ width: `${Math.min(100, b.percentage)}%` }}/></div><div className="flex justify-end"><button onClick={() => deleteBudget(b.id)} className="text-[9px] text-rose-400">Eliminar</button></div></div>))}</div>}
+                {isVisible && (
+                    <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                        {budgetStats.map(b => (
+                            <div 
+                                key={b.id} 
+                                onClick={() => handleBudgetClick(b.category)}
+                                className={`p-3 rounded-xl border cursor-pointer hover:scale-[1.02] transition-transform ${borderClass} ${darkMode?'bg-slate-800/50':'bg-slate-50'}`}
+                            >
+                                <div className="flex justify-between mb-1">
+                                    <div className="flex flex-col">
+                                        <span className={`text-xs font-bold ${textClass}`}>{b.category}</span>
+                                        <span className={`text-[8px] font-bold ${mutedText}`}>Reinicia en {b.daysRemaining} días</span>
+                                    </div>
+                                    <span className={`text-[10px] font-black ${b.percentage>100?'text-rose-500':'text-violet-500'}`}>${b.spent.toLocaleString()} / ${Number(b.limit).toLocaleString()}</span>
+                                </div>
+                                <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden mb-1">
+                                    <div className={`h-full ${b.percentage>100?'bg-rose-500':'bg-violet-500'}`} style={{ width: `${Math.min(100, b.percentage)}%` }}/>
+                                </div>
+                                <div className="flex justify-end">
+                                    <button onClick={(e) => { e.stopPropagation(); deleteBudget(b.id); }} className="text-[9px] text-rose-400 hover:text-rose-600">Eliminar</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
               </section>
             );
 
@@ -481,8 +652,11 @@ const App = () => {
         <div className="lg:col-span-8 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* PIE CHART */}
-            <div className={`p-6 rounded-[2.5rem] border min-h-[460px] flex flex-col ${cardClass}`}>
-              <h3 className={`font-bold text-[10px] uppercase mb-4 tracking-widest ${mutedText}`}>Distribución</h3>
+            <div className={`p-6 rounded-[2.5rem] border min-h-[460px] flex flex-col relative ${cardClass}`}>
+              <div className="flex justify-between items-center mb-4">
+                  <h3 className={`font-bold text-[10px] uppercase tracking-widest ${mutedText}`}>Distribución</h3>
+                  <button onClick={() => setExpandedChart('pie')} className="p-1.5 text-slate-400 hover:text-blue-500 rounded-lg transition-colors"><Maximize2 size={16}/></button>
+              </div>
               <div className="flex-1 w-full h-full relative">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -496,9 +670,17 @@ const App = () => {
                       cy="45%" 
                       onClick={onPieClick} 
                       cursor="pointer"
-                      label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                      label={({ name, percent }) => {
+                          const value = (percent * 100).toFixed(0);
+                          // LÓGICA DE VISUALIZACIÓN:
+                          // Si es >= 20%, mostramos icono + porcentaje
+                          // Si es < 20%, solo mostramos porcentaje para ahorrar espacio
+                          if (percent >= 0.2) return `${getCategoryIcon(name)} ${value}%`;
+                          return `${value}%`;
+                      }}
                     >
-                      {filteredData.pieData.map((_, i) => <Cell key={i} fill={['#3B82F6', '#8B5CF6', '#10B981', '#f43f5e', '#F59E0B', '#EC4899'][i % 6]} stroke="none" />)}
+                      {/* APLICACION DE LA PALETA DINAMICA */}
+                      {filteredData.pieData.map((_, i) => <Cell key={i} fill={currentPalette[i % currentPalette.length]} stroke="none" />)}
                     </Pie>
                     <Tooltip contentStyle={{borderRadius: '16px', border:'none', backgroundColor: darkMode ? '#1e293b' : '#fff', color: darkMode ? '#fff' : '#334155'}} />
                   </PieChart>
@@ -506,8 +688,11 @@ const App = () => {
               </div>
             </div>
             {/* AREA CHART */}
-            <div className={`p-6 rounded-[2.5rem] border min-h-[460px] flex flex-col ${cardClass}`}>
-              <h3 className={`font-bold text-[10px] uppercase mb-4 tracking-widest text-emerald-500`}>Línea de Tiempo</h3>
+            <div className={`p-6 rounded-[2.5rem] border min-h-[460px] flex flex-col relative ${cardClass}`}>
+              <div className="flex justify-between items-center mb-4">
+                  <h3 className={`font-bold text-[10px] uppercase tracking-widest text-emerald-500`}>Línea de Tiempo</h3>
+                  <button onClick={() => setExpandedChart('trend')} className="p-1.5 text-slate-400 hover:text-emerald-500 rounded-lg transition-colors"><Maximize2 size={16}/></button>
+              </div>
               <div className="flex-1 w-full h-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={trendData} margin={{ top: 20, right: 15, left: -10, bottom: 20 }}>
@@ -521,7 +706,7 @@ const App = () => {
                       tick={{fontSize: 10, fill: darkMode ? '#94a3b8' : '#64748b'}}
                       tickFormatter={(value) => {
                         if (!value) return '';
-                        const [year, month, day] = value.split('-');
+                        const [, month, day] = value.split('-'); // Corregido 'year' unused
                         return `${day} ${['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(month)-1]}`;
                       }}
                       interval="preserveStartEnd"
@@ -536,11 +721,18 @@ const App = () => {
             </div>
           </div>
 
-          <div className={`rounded-[2.5rem] border overflow-hidden ${cardClass}`}>
+          <div ref={historyRef} className={`rounded-[2.5rem] border overflow-hidden ${cardClass}`}>
             <div className={`p-6 md:p-8 border-b flex flex-col gap-4 ${darkMode ? 'bg-slate-900/50' : 'bg-slate-50/50'}`}>
               <div className="flex justify-between items-center w-full"><h3 className={`font-black text-lg flex items-center gap-2 ${textClass}`}><List size={18} style={{ color: themeColor }}/> Historial General</h3><div className="relative md:w-64"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14}/><input placeholder="Buscar..." className={`pl-9 pr-4 py-2 border rounded-xl text-xs w-full font-bold outline-none ${borderClass} ${darkMode ? 'bg-slate-800' : 'bg-white'} ${textClass}`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div></div>
               <div className="flex flex-wrap gap-2">
-                <select value={walletFilter} onChange={(e) => setWalletFilter(e.target.value)} className={`text-[10px] font-black uppercase px-3 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="all">🏦 Todas las Wallets</option>{wallets.map(w => <option key={w.id} value={w.id} className="text-slate-900">{w.name}</option>)}</select>
+                <select value={walletFilter} onChange={(e) => {
+                    const val = e.target.value;
+                    setWalletFilter(val);
+                    // FIX: Actualizamos la sección aquí en lugar de useEffect para evitar render loop
+                    if (val === 'all') {
+                        setSectionState(prev => ({ ...prev, wallets: true }));
+                    }
+                }} className={`text-[10px] font-black uppercase px-3 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="all">🏦 Todas las Wallets</option>{wallets.map(w => <option key={w.id} value={w.id} className="text-slate-900">{w.name}</option>)}</select>
                 <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={`text-[10px] font-black uppercase px-3 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="all">🏷️ Todas Categorías</option>{categories.map(c => <option key={c} value={c} className="text-slate-900">{c}</option>)}</select>
                 <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={`text-[10px] font-black uppercase px-4 py-2 rounded-xl border outline-none bg-transparent ${textClass}`}><option value="date-desc">📅 Recientes</option><option value="date-asc">📅 Antiguos</option><option value="amount-desc">💰 Monto Max</option></select>
               </div>
