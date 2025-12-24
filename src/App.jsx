@@ -5,7 +5,7 @@ import {
   CreditCard, RotateCcw, PiggyBank, Moon, Sun, ArrowRightCircle, 
   Repeat, ArrowUp, ArrowDown, Target, Plus, AlertTriangle, Sparkles, 
   Clock, AlertCircle, ChevronDown, ChevronUp, Eye, EyeOff, 
-  CreditCard as CardIcon, Maximize2
+  CreditCard as CardIcon, Maximize2, Zap, Calculator, Calendar
 } from 'lucide-react';
 import { 
   PieChart, Pie, Legend, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -20,6 +20,9 @@ const App = () => {
   const [categories, setCategories] = useState(() => JSON.parse(localStorage.getItem('fin_categories')) || ["🏠 Vivienda", "🍔 Comida", "🚌 Transporte", "💊 Salud", "🎉 Ocio", "📺 Suscripciones", "📱 Tecnología"]);
   const incomeCategories = ["Salario", "Ingreso Extra", "Devolución", "Regalo", "Inversión", "Otro"]; 
 
+  // --- NUEVO: ESTADO SUSCRIPCIONES ---
+  const [subscriptions, setSubscriptions] = useState(() => JSON.parse(localStorage.getItem('fin_subscriptions')) || []);
+
   const [recurring, setRecurring] = useState(() => JSON.parse(localStorage.getItem('fin_recurring')) || []);
   const [goals, setGoals] = useState(() => JSON.parse(localStorage.getItem('fin_goals')) || []); 
   const [budgets, setBudgets] = useState(() => JSON.parse(localStorage.getItem('fin_budgets')) || []); 
@@ -30,7 +33,7 @@ const App = () => {
 
   // --- ESTADO DE VISIBILIDAD DE SECCIONES ---
   const [sectionState, setSectionState] = useState(() => JSON.parse(localStorage.getItem('fin_sections_view')) || {
-    form: true, goals: true, budgets: true, categories: true, recurring: true, wallets: true
+    form: true, goals: true, budgets: true, categories: true, recurring: true, wallets: true, subscriptions: true
   });
 
   const [lastActivity, setLastActivity] = useState(() => localStorage.getItem('fin_last_activity') || "Sin actividad");
@@ -46,12 +49,10 @@ const App = () => {
   // Inicialización de orden de bloques
   const [leftOrder, setLeftOrder] = useState(() => {
     const saved = JSON.parse(localStorage.getItem('fin_order'));
-    const defaultOrder = ['form', 'goals', 'budgets', 'categories', 'recurring'];
+    const defaultOrder = ['form', 'goals', 'subscriptions', 'budgets', 'categories', 'recurring'];
     if (!saved) return defaultOrder;
-    const newOrder = [...saved];
-    if (!newOrder.includes('goals')) newOrder.splice(1, 0, 'goals');
-    if (!newOrder.includes('budgets')) newOrder.splice(2, 0, 'budgets');
-    return newOrder;
+    if (!saved.includes('subscriptions')) return ['subscriptions', ...saved];
+    return saved;
   });
   
   const [wallets, setWallets] = useState(() => JSON.parse(localStorage.getItem('fin_wallets')) || [
@@ -80,6 +81,12 @@ const App = () => {
   const [walletForm, setWalletForm] = useState({ id: '', name: '', type: 'cash', limit: 0 });
   const [goalForm, setGoalForm] = useState({ id: '', name: '', target: '', saved: 0 });
   const [budgetForm, setBudgetForm] = useState({ id: '', category: '', limit: '' });
+  
+  // --- NUEVO: FORMULARIO SUSCRIPCION ---
+  const [subForm, setSubForm] = useState({ id: '', name: '', price: '', day: 1, details: '' });
+  // --- NUEVO: ESTADO SIMULADOR ---
+  const [simAmount, setSimAmount] = useState('');
+  const [simResult, setSimResult] = useState(null);
 
   // Formularios
   const [incomeForm, setIncomeForm] = useState({ name: '', amount: '', date: new Date().toISOString().split('T')[0], walletId: 'w3', category: 'Salario', details: '' });
@@ -93,6 +100,7 @@ const App = () => {
     localStorage.setItem('fin_categories', JSON.stringify(categories));
     localStorage.setItem('fin_wallets', JSON.stringify(wallets));
     localStorage.setItem('fin_recurring', JSON.stringify(recurring));
+    localStorage.setItem('fin_subscriptions', JSON.stringify(subscriptions));
     localStorage.setItem('fin_goals', JSON.stringify(goals));
     localStorage.setItem('fin_budgets', JSON.stringify(budgets));
     localStorage.setItem('fin_theme', themeColor);
@@ -100,7 +108,7 @@ const App = () => {
     localStorage.setItem('fin_order', JSON.stringify(leftOrder));
     localStorage.setItem('fin_sections_view', JSON.stringify(sectionState));
     localStorage.setItem('fin_privacy', JSON.stringify(privacyMode)); 
-  }, [incomes, expenses, categories, wallets, recurring, goals, budgets, themeColor, darkMode, leftOrder, sectionState, privacyMode]);
+  }, [incomes, expenses, categories, wallets, recurring, subscriptions, goals, budgets, themeColor, darkMode, leftOrder, sectionState, privacyMode]);
 
   // CALCULAR SI ESTAMOS "LATE"
   useEffect(() => {
@@ -157,14 +165,13 @@ const App = () => {
     setExpandedChart(null);
   };
 
-  // --- MAGIC INPUT (CORREGIDO) ---
+  // --- MAGIC INPUT ---
   useEffect(() => {
     if (!magicText.trim()) { 
-        if(magicPreview) setMagicPreview(null); // Verificación para evitar re-render innecesario
+        if(magicPreview) setMagicPreview(null);
         return; 
     }
     const lowerText = magicText.toLowerCase();
-    // Regex corregido (quitado el escape innecesario)
     const amountMatch = magicText.match(/[$]?\d+([.,]\d{1,2})?/);
     const amount = amountMatch ? amountMatch[0].replace('$','').replace(',','.') : null;
     let detectedWallet = null;
@@ -268,6 +275,49 @@ const App = () => {
   const deleteWallet = (id) => { if (window.confirm("¿Eliminar cuenta?")) { setWallets(wallets.filter(w => w.id !== id)); touchActivity(); } };
   const handleGoalSave = () => { if (!goalForm.name || !goalForm.target) return; if (goalForm.id) setGoals(goals.map(g => g.id === goalForm.id ? goalForm : g)); else setGoals([...goals, { ...goalForm, id: 'g' + Date.now() }]); setModalMode(null); setGoalForm({ id: '', name: '', target: '', saved: 0 }); touchActivity(); };
   const handleBudgetSave = () => { if (!budgetForm.category || !budgetForm.limit) return; const exists = budgets.find(b => b.category === budgetForm.category && b.id !== budgetForm.id); if(exists) { alert("Ya existe un presupuesto para esta categoría"); return; } if (budgetForm.id) setBudgets(budgets.map(b => b.id === budgetForm.id ? budgetForm : b)); else setBudgets([...budgets, { ...budgetForm, id: 'b' + Date.now() }]); setModalMode(null); setBudgetForm({ id: '', category: categories[0], limit: '' }); touchActivity(); };
+  
+  // --- HANDLERS SUSCRIPCIONES ---
+  const handleSubSave = () => { if(!subForm.name || !subForm.price) return; if(subForm.id) setSubscriptions(subscriptions.map(s => s.id === subForm.id ? subForm : s)); else setSubscriptions([...subscriptions, {...subForm, id: 's' + Date.now()}]); setModalMode(null); setSubForm({id:'', name:'', price:'', day:1, details:''}); touchActivity(); };
+  const deleteSub = (id) => { setSubscriptions(subscriptions.filter(s => s.id !== id)); touchActivity(); };
+  const paySub = (sub) => {
+    setActiveTab('expense');
+    setExpenseForm({ name: sub.name, amount: sub.price, date: new Date().toISOString().split('T')[0], walletId: wallets[0].id, category: 'Suscripciones', details: sub.details });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  const subStats = useMemo(() => {
+    const monthly = subscriptions.reduce((acc, sub) => acc + Number(sub.price), 0);
+    return { monthly, yearly: monthly * 12 };
+  }, [subscriptions]);
+
+  // --- HANDLER SIMULADOR ---
+  const runSimulation = () => {
+    const val = Number(simAmount);
+    if(val <= 0) return;
+    const msgs = [];
+    const futureBalance = totalNetWorth - val;
+    
+    // Check 1: Saldo total
+    if (futureBalance < 0) msgs.push({ type: 'danger', text: "❌ Te quedarás en números rojos (Deuda Total)." });
+    else msgs.push({ type: 'success', text: `✅ Tu patrimonio bajará a $${futureBalance.toLocaleString()}, pero sigues solvente.` });
+
+    // Check 2: Presupuestos
+    // Usamos una categoría genérica o la primera para el ejemplo
+    const impactedBudgets = budgets.filter(b => (b.limit - b.spent) < val);
+    if(impactedBudgets.length > 0) {
+        msgs.push({ type: 'warning', text: `⚠️ Romperás el presupuesto de: ${impactedBudgets.map(b=>b.category).join(', ')}.` });
+    } else {
+        msgs.push({ type: 'success', text: "✅ No rompes ningún presupuesto actual." });
+    }
+
+    // Check 3: Suscripciones pendientes este mes
+    const pendingSubsCost = subscriptions.reduce((acc, s) => acc + Number(s.price), 0);
+    if (futureBalance < pendingSubsCost) {
+        msgs.push({ type: 'warning', text: "⚠️ Cuidado: No te quedará suficiente para pagar todas tus suscripciones del mes." });
+    }
+
+    setSimResult(msgs);
+  };
+
   const addFundsToGoal = (goal) => { const amount = prompt(`Monto a sumar a ${goal.name}:`); if (amount && !isNaN(amount)) { setGoals(goals.map(g => g.id === goal.id ? { ...g, saved: Number(g.saved) + Number(amount) } : g)); touchActivity(); } };
   const deleteGoal = (id) => { setGoals(goals.filter(g => g.id !== id)); touchActivity(); }
   const deleteBudget = (id) => { setBudgets(budgets.filter(b => b.id !== id)); touchActivity(); }
@@ -319,7 +369,6 @@ const App = () => {
                                     dataKey="value" 
                                     label={({ name, percent }) => {
                                         const value = (percent * 100).toFixed(0);
-                                        // MEJORA: Solo muestra el icono si es >= 20%
                                         if (percent >= 0.2) return `${getCategoryIcon(name)} ${value}%`;
                                         return `${value}%`;
                                     }}
@@ -352,6 +401,7 @@ const App = () => {
       {modalMode && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
           <div className={`${darkMode ? 'bg-slate-900 border border-slate-700' : 'bg-white'} rounded-[2.5rem] p-8 w-full max-w-md shadow-2xl relative z-50`}>
+            {/* ... WALLET MODAL ... */}
             {modalMode === 'wallet' && (
               <>
                 <h3 className={`text-xl font-black mb-6 flex gap-2 ${textClass}`}><Settings/> {walletForm.id ? 'Editar Cuenta' : 'Nueva Cuenta'}</h3>
@@ -365,6 +415,68 @@ const App = () => {
                 </div>
               </>
             )}
+            
+            {/* ... NUEVO: MODAL SUSCRIPCION (DISEÑO MEJORADO) ... */}
+            {modalMode === 'sub' && (
+              <>
+                <h3 className={`text-xl font-black mb-6 flex gap-2 ${textClass}`}><Calendar/> {subForm.id ? 'Editar Suscripción' : 'Nueva Suscripción'}</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className={`text-[10px] font-black uppercase ml-1 mb-1 block ${mutedText}`}>Nombre del servicio</label>
+                    <input placeholder="Ej: Netflix, Spotify..." className={`w-full p-4 rounded-2xl font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={subForm.name} onChange={e => setSubForm({...subForm, name: e.target.value})} />
+                  </div>
+                  
+                  <div className="flex gap-4">
+                    <div className="flex-1">
+                        <label className={`text-[10px] font-black uppercase ml-1 mb-1 block ${mutedText}`}>Valor (USD)</label>
+                        <input type="number" placeholder="$ 0.00" className={`w-full p-4 rounded-2xl font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={subForm.price} onChange={e => setSubForm({...subForm, price: e.target.value})} />
+                    </div>
+                    <div className="w-32">
+                        <label className={`text-[10px] font-black uppercase ml-1 mb-1 block ${mutedText}`}>Día Renovación</label>
+                        <input type="number" min="1" max="31" placeholder="Ej: 15" className={`w-full p-4 rounded-2xl font-bold outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={subForm.day} onChange={e => setSubForm({...subForm, day: e.target.value})} />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className={`text-[10px] font-black uppercase ml-1 mb-1 block ${mutedText}`}>Detalles (Opcional)</label>
+                    <input placeholder="Ej: Plan Familiar 4K" className={`w-full p-4 rounded-2xl text-xs outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={subForm.details} onChange={e => setSubForm({...subForm, details: e.target.value})} />
+                  </div>
+
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={() => setModalMode(null)} className="flex-1 py-4 font-bold text-slate-400">Cancelar</button>
+                    <button onClick={handleSubSave} className="flex-1 py-4 bg-indigo-500 text-white rounded-2xl font-black shadow-lg">{subForm.id ? 'ACTUALIZAR' : 'CREAR'}</button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* ... NUEVO: MODAL SIMULADOR ... */}
+            {modalMode === 'simulator' && (
+              <>
+                <h3 className={`text-xl font-black mb-6 flex gap-2 ${textClass}`}><Calculator/> Simulador "What If"</h3>
+                <div className="space-y-4">
+                  <p className={`text-xs ${mutedText}`}>¿Qué pasa si gasto esto hoy?</p>
+                  <input type="number" placeholder="Monto a gastar..." className={`w-full p-4 rounded-2xl font-black text-2xl outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={simAmount} onChange={e => setSimAmount(e.target.value)} />
+                  
+                  {simResult && (
+                    <div className="space-y-2 mt-2">
+                        {simResult.map((res, i) => (
+                            <div key={i} className={`p-3 rounded-xl text-xs font-bold ${res.type==='danger' ? 'bg-rose-500/10 text-rose-500' : res.type==='warning' ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                                {res.text}
+                            </div>
+                        ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button onClick={() => {setModalMode(null); setSimResult(null); setSimAmount('');}} className="flex-1 py-4 font-bold text-slate-400">Cerrar</button>
+                    <button onClick={runSimulation} className="flex-1 py-4 bg-purple-600 text-white rounded-2xl font-black shadow-lg">SIMULAR</button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* ... GOAL MODAL ... */}
             {modalMode === 'goal' && (
               <>
                 <h3 className={`text-xl font-black mb-6 flex gap-2 ${textClass}`}><Target/> {goalForm.id ? 'Editar Meta' : 'Nueva Meta'}</h3>
@@ -376,6 +488,7 @@ const App = () => {
                 </div>
               </>
             )}
+            {/* ... BUDGET MODAL ... */}
             {modalMode === 'budget' && (
               <>
                 <h3 className={`text-xl font-black mb-6 flex gap-2 ${textClass}`}><AlertTriangle/> Presupuesto Mensual</h3>
@@ -397,7 +510,7 @@ const App = () => {
           <div className="flex flex-col md:flex-row items-center gap-4">
             <div className="flex items-center gap-2" style={{ color: themeColor }}>
                 <Wallet size={28} strokeWidth={2.5} />
-                <h1 className="text-xl font-black uppercase">FinPlan Pro <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full ml-1">v50</span></h1>
+                <h1 className="text-xl font-black uppercase">FinPlan Pro <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full ml-1">v2.0</span></h1>
             </div>
             
             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-[10px] font-bold uppercase tracking-wide transition-all duration-500 
@@ -412,6 +525,11 @@ const App = () => {
           </div>
 
           <div className="flex flex-wrap gap-3 items-center">
+            {/* --- NUEVO: BOTÓN SIMULADOR EN HEADER --- */}
+            <button onClick={() => setModalMode('simulator')} className={`p-2 rounded-xl flex items-center gap-2 border font-bold text-[10px] uppercase hover:scale-105 transition-transform ${darkMode ? 'bg-purple-900/20 border-purple-500 text-purple-300' : 'bg-purple-50 border-purple-200 text-purple-600'}`}>
+                <Calculator size={16} /> What If?
+            </button>
+
             <div className={`flex p-1.5 rounded-2xl border items-center gap-2 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-100'}`}>
               <select className={`rounded-xl px-2 py-1 text-[10px] font-black uppercase outline-none bg-transparent ${textClass}`} onChange={(e) => {
                 const month = e.target.value; const year = dateTo.split('-')[0] || '2025';
@@ -419,13 +537,7 @@ const App = () => {
               }}>
                 <option value="">MES</option>{["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"].map((m, i) => <option key={m} value={i+1} className="text-slate-900">{m}</option>)}
               </select>
-              <select className={`rounded-xl px-2 py-1 text-[10px] font-black outline-none bg-transparent ${textClass}`} onChange={(e) => { const year = e.target.value; if(year) { setDateFrom(`${year}-01-01`); setDateTo(`${year}-12-31`); } }}>
-                <option value="">AÑO</option>{["2024","2025","2026"].map(y => <option key={y} value={y} className="text-slate-900">{y}</option>)}
-              </select>
               <div className="h-4 w-[1px] bg-slate-400 mx-1"></div>
-              <input type="date" className={`bg-transparent border-none text-[10px] font-bold outline-none w-24 ${textClass}`} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-              <span className="text-slate-400">→</span>
-              <input type="date" className={`bg-transparent border-none text-[10px] font-bold outline-none w-24 ${textClass}`} value={dateTo} onChange={e => setDateTo(e.target.value)} />
               <button onClick={() => {setDateFrom(""); setDateTo(new Date().toISOString().split('T')[0]);}} className="p-1 text-slate-400 hover:text-blue-500"><RotateCcw size={14}/></button>
               <button onClick={() => setDarkMode(!darkMode)} className={`p-2 rounded-xl ml-2 ${darkMode ? 'bg-amber-500 text-slate-900' : 'bg-slate-900 text-white'}`}>{darkMode ? <Sun size={16}/> : <Moon size={16}/>}</button>
             </div>
@@ -580,6 +692,61 @@ const App = () => {
               </section>
             );
 
+            // --- NUEVO: BLOQUE SUSCRIPCIONES (DISEÑO MEJORADO) ---
+            if(block === 'subscriptions') return (
+                <section key="subscriptions" className={`p-6 rounded-[2.5rem] border relative transition-all ${cardClass}`}>
+                    {ctrls}
+                    <div className={`flex justify-between items-center ${isVisible ? 'mb-4 pr-28' : ''}`}>
+                        <h3 className={`text-[10px] font-black uppercase flex items-center gap-2 ${mutedText}`}><Calendar size={14}/> Suscripciones</h3>
+                        {isVisible && <button onClick={()=>{setSubForm({id:'', name:'', price:'', day:1, details:''}); setModalMode('sub');}} className="p-1.5 text-indigo-500 bg-indigo-500/10 rounded-lg hover:bg-indigo-500/20 transition-colors"><Plus size={18}/></button>}
+                    </div>
+                    {isVisible && (
+                        <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                             <div className="space-y-3 max-h-56 overflow-y-auto mb-3 pr-1">
+                                {subscriptions.length === 0 && <p className="text-xs text-center text-slate-400 italic py-2">Sin suscripciones</p>}
+                                {subscriptions.map(s => {
+                                    return (
+                                        <div key={s.id} className={`p-3 rounded-xl border flex items-center justify-between group ${borderClass} ${darkMode ? 'bg-slate-800/30' : 'bg-slate-50'}`}>
+                                            <div className="flex items-center gap-3 overflow-hidden">
+                                                <div className={`w-10 h-10 rounded-full flex shrink-0 items-center justify-center font-black text-sm text-white bg-indigo-500 shadow-sm`}>
+                                                    {s.name.charAt(0)}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className={`text-xs font-bold truncate ${textClass}`}>{s.name}</p>
+                                                    <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1">
+                                                        <span>📅 Día {s.day}</span>
+                                                        <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                                                        <span>${Number(s.price).toLocaleString()}</span>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-1 shrink-0">
+                                                <button onClick={() => paySub(s)} className="p-2 bg-emerald-500/10 text-emerald-500 rounded-lg hover:bg-emerald-500/20 transition-colors" title="Registrar Pago"><Zap size={14}/></button>
+                                                <button onClick={() => {setSubForm(s); setModalMode('sub');}} className="p-2 bg-blue-500/10 text-blue-500 rounded-lg hover:bg-blue-500/20 transition-colors" title="Editar"><Edit3 size={14}/></button>
+                                                <button onClick={() => deleteSub(s.id)} className="p-2 bg-rose-500/10 text-rose-500 rounded-lg hover:bg-rose-500/20 transition-colors" title="Eliminar"><Trash2 size={14}/></button>
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                             </div>
+                             {subscriptions.length > 0 && (
+                                 <div className={`p-4 rounded-2xl border flex justify-between items-center ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-indigo-50 border-indigo-100'}`}>
+                                     <div className="flex flex-col">
+                                         <span className="text-[9px] font-black uppercase text-indigo-400">Mensual</span>
+                                         <span className="text-lg font-black text-indigo-600 dark:text-indigo-400">${subStats.monthly.toLocaleString()}</span>
+                                     </div>
+                                     <div className="h-8 w-[1px] bg-indigo-200 dark:bg-slate-600"></div>
+                                     <div className="flex flex-col text-right">
+                                         <span className="text-[9px] font-black uppercase text-rose-400">Anual</span>
+                                         <span className="text-lg font-black text-rose-500">${subStats.yearly.toLocaleString()}</span>
+                                     </div>
+                                 </div>
+                             )}
+                        </div>
+                    )}
+                </section>
+            );
+
             if(block === 'goals') return (
               <section key="goals" className={`p-6 rounded-[2.5rem] border relative transition-all ${cardClass}`}>
                 {ctrls}
@@ -636,7 +803,7 @@ const App = () => {
             if(block === 'recurring') return (
               <section key="recurring" className={`p-6 rounded-[2.5rem] border relative transition-all ${cardClass}`}>
                 {ctrls}
-                <h3 className={`text-[10px] font-black uppercase ${isVisible ? 'mb-4' : ''} flex items-center gap-2 ${mutedText}`}><Repeat size={14} style={{ color: themeColor }}/> Programados</h3>
+                <h3 className={`text-[10px] font-black uppercase ${isVisible ? 'mb-4' : ''} flex items-center gap-2 ${mutedText}`}><Repeat size={14} style={{ color: themeColor }}/> Programados (Varios)</h3>
                 {isVisible && (
                   <div className="animate-in fade-in slide-in-from-top-2 duration-300">
                     <div className="flex gap-2 mb-4"><input placeholder="Fijo..." className={`flex-1 p-2.5 text-xs rounded-xl outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={recurringForm.name} onChange={e => setRecurringForm({...recurringForm, name: e.target.value})} /><input type="number" placeholder="$" className={`w-20 p-2.5 text-xs rounded-xl outline-none border ${borderClass} ${darkMode?'bg-slate-800':'bg-slate-50'} ${textClass}`} value={recurringForm.amount} onChange={e => setRecurringForm({...recurringForm, amount: e.target.value})} /><button onClick={()=>{if(recurringForm.name)setRecurring([...recurring,{...recurringForm,id:Date.now()}]);setRecurringForm({name:'',amount:'',category:'Vivienda'});}} className="bg-slate-900 text-white p-2.5 rounded-xl"><PlusCircle size={18}/></button></div>
@@ -672,14 +839,10 @@ const App = () => {
                       cursor="pointer"
                       label={({ name, percent }) => {
                           const value = (percent * 100).toFixed(0);
-                          // LÓGICA DE VISUALIZACIÓN:
-                          // Si es >= 20%, mostramos icono + porcentaje
-                          // Si es < 20%, solo mostramos porcentaje para ahorrar espacio
                           if (percent >= 0.2) return `${getCategoryIcon(name)} ${value}%`;
                           return `${value}%`;
                       }}
                     >
-                      {/* APLICACION DE LA PALETA DINAMICA */}
                       {filteredData.pieData.map((_, i) => <Cell key={i} fill={currentPalette[i % currentPalette.length]} stroke="none" />)}
                     </Pie>
                     <Tooltip contentStyle={{borderRadius: '16px', border:'none', backgroundColor: darkMode ? '#1e293b' : '#fff', color: darkMode ? '#fff' : '#334155'}} />
@@ -706,7 +869,7 @@ const App = () => {
                       tick={{fontSize: 10, fill: darkMode ? '#94a3b8' : '#64748b'}}
                       tickFormatter={(value) => {
                         if (!value) return '';
-                        const [, month, day] = value.split('-'); // Corregido 'year' unused
+                        const [, month, day] = value.split('-'); 
                         return `${day} ${['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(month)-1]}`;
                       }}
                       interval="preserveStartEnd"
@@ -728,7 +891,6 @@ const App = () => {
                 <select value={walletFilter} onChange={(e) => {
                     const val = e.target.value;
                     setWalletFilter(val);
-                    // FIX: Actualizamos la sección aquí en lugar de useEffect para evitar render loop
                     if (val === 'all') {
                         setSectionState(prev => ({ ...prev, wallets: true }));
                     }
